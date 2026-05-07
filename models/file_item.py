@@ -2,6 +2,26 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
 
+FILE_TYPE_MAP = {
+    '.txt': 'document', '.md': 'document', '.log': 'document', '.csv': 'document',
+    '.json': 'document', '.xml': 'document', '.yaml': 'document', '.yml': 'document',
+    '.ini': 'document', '.cfg': 'document', '.conf': 'document', '.toml': 'document',
+    '.pdf': 'document', '.docx': 'document', '.doc': 'document',
+    '.xlsx': 'document', '.xls': 'document', '.pptx': 'document', '.ppt': 'document',
+    '.py': 'code', '.js': 'code', '.ts': 'code', '.html': 'code', '.css': 'code',
+    '.java': 'code', '.c': 'code', '.cpp': 'code', '.h': 'code', '.go': 'code',
+    '.rs': 'code', '.rb': 'code', '.php': 'code', '.sh': 'code', '.bat': 'code',
+    '.ps1': 'code', '.sql': 'code',
+    '.jpg': 'image', '.jpeg': 'image', '.png': 'image', '.gif': 'image',
+    '.bmp': 'image', '.tiff': 'image', '.svg': 'image', '.ico': 'image',
+    '.mp4': 'video', '.mkv': 'video', '.avi': 'video', '.mov': 'video',
+    '.wmv': 'video', '.flv': 'video',
+    '.mp3': 'audio', '.wav': 'audio', '.flac': 'audio', '.aac': 'audio',
+    '.ogg': 'audio', '.wma': 'audio',
+    '.zip': 'archive', '.rar': 'archive', '.7z': 'archive', '.tar': 'archive',
+    '.gz': 'archive', '.bz2': 'archive',
+}
+
 @dataclass
 class FileItem:
     path: str
@@ -14,6 +34,8 @@ class FileItem:
 
     @property
     def size_display(self) -> str:
+        if self.is_directory:
+            return ""
         if self.size < 1024:
             return f"{self.size} B"
         elif self.size < 1024 * 1024:
@@ -25,24 +47,13 @@ class FileItem:
 
     @property
     def modified_date(self) -> str:
+        if self.is_directory:
+            return ""
         return self.modified_time.strftime("%Y-%m-%d %H:%M")
 
     @property
     def file_type(self) -> str:
+        if self.is_directory:
+            return 'folder'
         ext = self.extension.lower()
-        if ext in {'.txt', '.md', '.log', '.csv', '.json', '.xml', '.yaml', '.yml', 
-                   '.ini', '.cfg', '.conf', '.toml', '.pdf', '.docx', '.xlsx', '.pptx'}:
-            return 'document'
-        elif ext in {'.py', '.js', '.ts', '.html', '.css', '.java', '.c', '.cpp', 
-                     '.h', '.go', '.rs', '.rb', '.php', '.sh', '.bat', '.ps1', '.sql'}:
-            return 'code'
-        elif ext in {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.svg', '.ico'}:
-            return 'image'
-        elif ext in {'.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv'}:
-            return 'video'
-        elif ext in {'.mp3', '.wav', '.flac', '.aac', '.ogg', '.wma'}:
-            return 'audio'
-        elif ext in {'.zip', '.rar', '.7z', '.tar', '.gz', '.bz2'}:
-            return 'archive'
-        else:
-            return 'other'
+        return FILE_TYPE_MAP.get(ext, 'other')

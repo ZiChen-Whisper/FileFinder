@@ -14,14 +14,17 @@ def detect_file_encoding(file_path: str) -> str:
     Returns:
         检测到的编码名称
     """
-    with open(file_path, 'rb') as f:
-        raw = f.read(4)
-        if raw.startswith(b'\xff\xfe'):
-            return 'utf-16-le'
-        if raw.startswith(b'\xfe\xff'):
-            return 'utf-16-be'
-        if raw.startswith(b'\xef\xbb\xbf'):
-            return 'utf-8-sig'
+    try:
+        with open(file_path, 'rb') as f:
+            raw = f.read(4)
+            if raw.startswith(b'\xff\xfe'):
+                return 'utf-16-le'
+            if raw.startswith(b'\xfe\xff'):
+                return 'utf-16-be'
+            if raw.startswith(b'\xef\xbb\xbf'):
+                return 'utf-8-sig'
+    except (OSError, PermissionError):
+        return 'utf-8'
 
     try:
         result = charset_normalizer.from_path(file_path)
@@ -44,7 +47,15 @@ def read_text_file(file_path: str, max_size_mb: int = 10) -> Optional[str]:
     Returns:
         文件内容，如果读取失败或文件过大返回None
     """
-    if os.path.getsize(file_path) > max_size_mb * 1024 * 1024:
+    if os.path.isdir(file_path):
+        return None
+
+    try:
+        file_size = os.path.getsize(file_path)
+    except OSError:
+        return None
+
+    if file_size > max_size_mb * 1024 * 1024:
         return None
 
     encoding = detect_file_encoding(file_path)

@@ -1,7 +1,8 @@
 import os
+import string
 from pathlib import Path
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 from models.file_item import FileItem
 
 def normalize_path(path: str) -> str:
@@ -68,17 +69,6 @@ def is_excluded_extension(ext: str, exclude_extensions: list) -> bool:
     return ext.lower() in [e.lower() for e in exclude_extensions]
 
 def is_binary_file(file_path: str) -> bool:
-    """
-    判断文件是否为二进制文件。
-    
-    通过检查文件头是否包含null字节来判断。
-    
-    Args:
-        file_path: 文件路径
-    
-    Returns:
-        是否为二进制文件
-    """
     try:
         with open(file_path, 'rb') as f:
             chunk = f.read(1024)
@@ -90,3 +80,21 @@ def is_binary_file(file_path: str) -> bool:
             return True
     except Exception:
         return True
+
+def get_all_drives() -> List[str]:
+    drives = []
+    for letter in string.ascii_uppercase:
+        drive = f"{letter}:\\"
+        if os.path.exists(drive):
+            drives.append(drive)
+    return drives
+
+def get_user_directories() -> List[str]:
+    home = os.path.expanduser("~")
+    candidates = [
+        home,
+        os.path.join(home, "Desktop"),
+        os.path.join(home, "Documents"),
+        os.path.join(home, "Downloads"),
+    ]
+    return [d for d in candidates if os.path.isdir(d)]

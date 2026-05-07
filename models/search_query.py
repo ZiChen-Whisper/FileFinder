@@ -13,6 +13,7 @@ class SearchQuery:
     content_case_sensitive: bool = False
 
     file_types: List[str] = field(default_factory=list)
+    exclude_file_types: List[str] = field(default_factory=list)
     size_min: Optional[int] = None
     size_max: Optional[int] = None
     date_from: Optional[datetime] = None

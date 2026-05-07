@@ -1,6 +1,6 @@
 import os
 import json
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 DEFAULT_CONFIG = {
     "general": {
@@ -71,7 +71,8 @@ def get_default_search_dirs() -> List[str]:
     config = load_config()
     dirs = config.get("search", {}).get("default_dirs", [])
     if not dirs:
-        return [os.path.expanduser("~")]
+        from utils.path_helper import get_all_drives
+        return get_all_drives()
     return dirs
 
 def get_exclude_dirs() -> List[str]:

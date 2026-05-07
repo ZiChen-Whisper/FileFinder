@@ -203,6 +203,12 @@ class PreviewPanel(QWidget):
         self.title_label.setText(result.file_item.name)
         self.title_label.setToolTip(result.file_item.path)
 
+        if result.file_item.is_directory:
+            self.empty_placeholder.setText("文件夹，无法预览内容")
+            self.empty_placeholder.setVisible(True)
+            self.editor_container.setVisible(False)
+            return
+
         content = read_text_file(result.file_item.path)
         if content:
             self.empty_placeholder.setVisible(False)

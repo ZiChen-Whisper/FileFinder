@@ -15,14 +15,17 @@ class ContentMatch:
 class SearchResult:
     file_item: FileItem
     match_reason: str
-    
+
     content_matches: List[ContentMatch] = field(default_factory=list)
+    name_match_score: int = 0
 
     @property
     def score(self) -> int:
         score = 0
         if self.match_reason in ('name', 'both'):
-            score += 10
+            score += self.name_match_score * 10
+            if self.name_match_score == 0:
+                score += 10
         if self.match_reason in ('content', 'both'):
             score += len(self.content_matches) * 5
         return score
