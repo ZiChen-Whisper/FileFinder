@@ -7,11 +7,11 @@ class SearchQuery:
     name_query: Optional[str] = None
     name_mode: str = 'fuzzy'
     name_case_sensitive: bool = False
-    
+
     content_query: Optional[str] = None
     content_mode: str = 'keyword'
     content_case_sensitive: bool = False
-    
+
     file_types: List[str] = field(default_factory=list)
     size_min: Optional[int] = None
     size_max: Optional[int] = None
@@ -19,6 +19,7 @@ class SearchQuery:
     date_to: Optional[datetime] = None
     include_dirs: List[str] = field(default_factory=list)
     exclude_dirs: List[str] = field(default_factory=list)
+    max_results: int = 1000
 
     @property
     def has_name_query(self) -> bool:
