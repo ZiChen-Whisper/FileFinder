@@ -31,11 +31,21 @@ class FileItem:
     modified_time: datetime
     created_time: datetime
     is_directory: bool = False
+    item_count: int = 0
 
     @property
     def size_display(self) -> str:
         if self.is_directory:
-            return ""
+            if self.size <= 0:
+                return ""
+            if self.size < 1024:
+                return f"{self.size} B"
+            elif self.size < 1024 * 1024:
+                return f"{self.size / 1024:.1f} KB"
+            elif self.size < 1024 * 1024 * 1024:
+                return f"{self.size / (1024 * 1024):.1f} MB"
+            else:
+                return f"{self.size / (1024 * 1024 * 1024):.1f} GB"
         if self.size < 1024:
             return f"{self.size} B"
         elif self.size < 1024 * 1024:
@@ -47,9 +57,15 @@ class FileItem:
 
     @property
     def modified_date(self) -> str:
-        if self.is_directory:
-            return ""
-        return self.modified_time.strftime("%Y-%m-%d %H:%M")
+        if isinstance(self.modified_time, datetime):
+            return self.modified_time.strftime("%Y-%m-%d %H:%M")
+        return ""
+
+    @property
+    def item_count_display(self) -> str:
+        if self.is_directory and self.item_count > 0:
+            return f"{self.item_count} 项"
+        return ""
 
     @property
     def file_type(self) -> str:

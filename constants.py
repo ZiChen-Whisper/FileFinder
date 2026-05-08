@@ -45,6 +45,7 @@ EXCLUDED_EXTENSIONS = {
 
 FILE_TYPE_CATEGORIES = {
     'all': '全部',
+    'folder': '文件夹',
     'document': '文档',
     'code': '代码',
     'image': '图片',

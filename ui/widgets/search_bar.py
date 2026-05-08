@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import QWidget, QLineEdit, QHBoxLayout, QVBoxLayout, QCheckBox, QPushButton
 from PySide6.QtCore import Signal, Qt, QPropertyAnimation, QEasingCurve, QSize, QTimer, QRectF, Property
-from PySide6.QtGui import QFont, QIcon, QPainter, QPen, QColor, QPalette
+from PySide6.QtGui import QFont, QFontMetrics, QIcon, QPainter, QPen, QColor, QPalette
 
 SEARCH_INPUT_STYLE = """
     QLineEdit {
@@ -169,8 +169,20 @@ class AnimatedCheckBox(QCheckBox):
         font = QFont()
         font.setPointSize(13)
         painter.setFont(font)
-        painter.drawText(int(text_x), int(self.height() / 2 + 5), self.text())
+        fm = QFontMetrics(font)
+        text_rect = QRectF(text_x, 0, fm.horizontalAdvance(self.text()) + 4, self.height())
+        painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, self.text())
         painter.end()
+
+    def minimumSizeHint(self):
+        font = QFont()
+        font.setPointSize(13)
+        fm = QFontMetrics(font)
+        text_width = fm.horizontalAdvance(self.text())
+        return QSize(26 + text_width + 16, 30)
+
+    def sizeHint(self):
+        return self.minimumSizeHint()
 
 
 class SearchBar(QWidget):
@@ -223,14 +235,35 @@ class SearchBar(QWidget):
         option_row = QHBoxLayout()
         option_row.setSpacing(20)
 
-        self.case_sensitive_checkbox = AnimatedCheckBox("区分大小写")
+        self.case_sensitive_checkbox = QCheckBox("区分大小写")
         self.case_sensitive_checkbox.setStyleSheet("""
             QCheckBox {
                 spacing: 6px;
                 font-size: 13px;
                 color: #4B5563;
-                padding: 4px 0;
                 outline: none;
+                text-decoration: none;
+                border: none;
+                background: transparent;
+            }
+            QCheckBox:focus {
+                outline: none;
+                border: none;
+            }
+            QCheckBox::indicator {
+                width: 18px;
+                height: 18px;
+                border-radius: 5px;
+                border: 2px solid #D1D5DB;
+                background-color: #FFFFFF;
+            }
+            QCheckBox::indicator:hover {
+                border-color: #9CA3AF;
+            }
+            QCheckBox::indicator:checked {
+                background-color: #7C3AED;
+                border-color: #7C3AED;
+                image: url(icons/checkmark.svg);
             }
         """)
 

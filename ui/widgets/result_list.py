@@ -1,9 +1,46 @@
 import os
 from PySide6.QtWidgets import (QListWidget, QListWidgetItem, QWidget, QVBoxLayout,
-                             QLabel, QHBoxLayout, QFrame, QMenu, QApplication, QAbstractItemView)
-from PySide6.QtGui import QFont, QIcon, QFontMetrics, QDrag, QPixmap, QPainter, QColor
-from PySide6.QtCore import Qt, Signal, QSize, QMimeData, QUrl, QPoint
+                             QLabel, QHBoxLayout, QFrame, QMenu, QApplication,
+                             QAbstractItemView, QProgressBar, QStackedWidget)
+from PySide6.QtGui import QFont, QIcon, QFontMetrics, QDrag, QPixmap, QPainter, QColor, QRegion, QPainterPath
+from PySide6.QtCore import Qt, Signal, QSize, QMimeData, QUrl, QPoint, QRectF
 from models import SearchResult
+
+
+class RoundedMenu(QMenu):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowFlags(
+            self.windowFlags()
+            | Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.NoDropShadowWindowHint
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self._border_radius = 10
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        path = QPainterPath()
+        rect = QRectF(self.rect()).adjusted(1, 1, -1, -1)
+        path.addRoundedRect(rect, self._border_radius, self._border_radius)
+        painter.setClipPath(path)
+
+        painter.setBrush(QColor("#FFFFFF"))
+        painter.setPen(QColor("#E5E7EB"))
+        painter.drawRoundedRect(rect, self._border_radius, self._border_radius)
+
+        painter.setClipping(False)
+        super().paintEvent(event)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1),
+                          self._border_radius, self._border_radius)
+        region = QRegion(path.toFillPolygon().toPolygon())
+        self.setMask(region)
 
 FILE_ICON_MAP = {
     '.py': 'doctype/code.svg', '.js': 'doctype/code.svg', '.ts': 'doctype/code.svg',
@@ -91,6 +128,54 @@ LIST_STYLE = f"""
         outline: none;
     }}
     {SCROLLBAR_STYLE}
+"""
+
+CENTER_PROGRESS_STYLE = """
+    QProgressBar {
+        border: none;
+        background-color: #E5E7EB;
+        border-radius: 4px;
+        height: 8px;
+        text-align: center;
+        font-size: 10px;
+        color: #6B7280;
+        outline: none;
+    }
+    QProgressBar::chunk {
+        background-color: #7C3AED;
+        border-radius: 4px;
+    }
+"""
+
+UNIFIED_MENU_STYLE = """
+    QMenu {
+        background-color: transparent;
+        border: none;
+        padding: 0px;
+    }
+    QMenu::item {
+        padding: 8px 32px 8px 36px;
+        border-radius: 8px;
+        font-size: 13px;
+        color: #1F2937;
+        background: transparent;
+    }
+    QMenu::item:selected {
+        background-color: #F5F3FF;
+        color: #7C3AED;
+    }
+    QMenu::icon {
+        padding-left: 10px;
+    }
+    QMenu::separator {
+        height: 1px;
+        background: #E5E7EB;
+        margin: 3px 8px;
+    }
+    QMenu::right-arrow {
+        width: 12px;
+        height: 12px;
+    }
 """
 
 
@@ -204,8 +289,24 @@ class ResultItemWidget(QFrame):
         """)
 
         info_row.addWidget(type_label)
-        info_row.addWidget(size_label)
-        info_row.addWidget(date_label)
+        if size_label.text():
+            info_row.addWidget(size_label)
+        if date_label.text():
+            info_row.addWidget(date_label)
+
+        if self._result.file_item.is_directory and self._result.file_item.item_count > 0:
+            item_count_label = QLabel(self._result.file_item.item_count_display)
+            item_count_label.setStyleSheet("""
+                background-color: #EDE9FE;
+                color: #7C3AED;
+                border-radius: 5px;
+                padding: 2px 8px;
+                font-size: 11px;
+                font-weight: bold;
+                border: none;
+            """)
+            info_row.addWidget(item_count_label)
+
         info_row.addStretch()
 
         content_layout.addLayout(name_row)
@@ -274,6 +375,71 @@ class ResultListWidget(QListWidget):
         self.itemDoubleClicked.connect(self._on_double_click)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.itemSelectionChanged.connect(self._on_selection_changed)
+
+        self._progress_overlay = None
+        self._progress_bar = None
+        self._progress_label = None
+        self._setup_progress_overlay()
+
+    def _setup_progress_overlay(self):
+        self._progress_overlay = QFrame(self)
+        self._progress_overlay.setStyleSheet("""
+            QFrame {
+                background-color: rgba(255, 255, 255, 220);
+                border-radius: 12px;
+            }
+        """)
+        overlay_layout = QVBoxLayout(self._progress_overlay)
+        overlay_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        overlay_layout.setSpacing(12)
+        overlay_layout.setContentsMargins(40, 40, 40, 40)
+
+        self._progress_label = QLabel("正在搜索...")
+        self._progress_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._progress_label.setStyleSheet("""
+            font-size: 15px;
+            font-weight: bold;
+            color: #4B5563;
+            background: transparent;
+            border: none;
+        """)
+        overlay_layout.addWidget(self._progress_label)
+
+        self._progress_bar = QProgressBar()
+        self._progress_bar.setFixedHeight(8)
+        self._progress_bar.setMinimum(0)
+        self._progress_bar.setMaximum(0)
+        self._progress_bar.setTextVisible(False)
+        self._progress_bar.setStyleSheet(CENTER_PROGRESS_STYLE)
+        overlay_layout.addWidget(self._progress_bar)
+
+        self._progress_overlay.setVisible(False)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self._progress_overlay and self._progress_overlay.isVisible():
+            self._position_progress_overlay()
+
+    def _position_progress_overlay(self):
+        if not self._progress_overlay:
+            return
+        overlay_w = min(self.width() - 40, 320)
+        overlay_h = 120
+        x = (self.width() - overlay_w) // 2
+        y = (self.height() - overlay_h) // 2
+        self._progress_overlay.setGeometry(x, y, overlay_w, overlay_h)
+
+    def show_search_progress(self, text: str = "正在搜索..."):
+        if self._progress_label:
+            self._progress_label.setText(text)
+        if self._progress_overlay:
+            self._progress_overlay.setVisible(True)
+            self._progress_overlay.raise_()
+            self._position_progress_overlay()
+
+    def hide_search_progress(self):
+        if self._progress_overlay:
+            self._progress_overlay.setVisible(False)
 
     def add_result(self, result: SearchResult):
         idx = len(self._results)
@@ -352,34 +518,8 @@ class ResultListWidget(QListWidget):
         if not result:
             return
 
-        menu = QMenu(self)
-        menu.setStyleSheet("""
-            QMenu {
-                background-color: #FFFFFF;
-                border: 1px solid #E5E7EB;
-                border-radius: 10px;
-                padding: 6px;
-            }
-            QMenu::item {
-                padding: 8px 32px 8px 36px;
-                border-radius: 6px;
-                font-size: 13px;
-                color: #1F2937;
-                background: transparent;
-            }
-            QMenu::item:selected {
-                background-color: #F5F3FF;
-                color: #7C3AED;
-            }
-            QMenu::icon {
-                padding-left: 10px;
-            }
-            QMenu::separator {
-                height: 1px;
-                background: #E5E7EB;
-                margin: 3px 8px;
-            }
-        """)
+        menu = RoundedMenu(self)
+        menu.setStyleSheet(UNIFIED_MENU_STYLE)
 
         open_action = menu.addAction(QIcon("icons/folder-open.svg"), "打开")
         open_path_action = menu.addAction(QIcon("icons/folder-open.svg"), "打开文件所在目录")

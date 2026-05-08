@@ -1,3 +1,4 @@
+import os
 import fnmatch
 from datetime import datetime
 from typing import List, Tuple
@@ -47,7 +48,7 @@ def _calculate_name_relevance(name: str, pattern: str, case_sensitive: bool = Fa
 
 def _row_to_file_item(row) -> FileItem:
     mod_ts = row["modified_time"]
-    if isinstance(mod_ts, (int, float)):
+    if isinstance(mod_ts, (int, float)) and mod_ts > 0:
         mod_dt = datetime.fromtimestamp(mod_ts)
     else:
         mod_dt = datetime.now()
@@ -58,7 +59,8 @@ def _row_to_file_item(row) -> FileItem:
         size=row["size"] or 0,
         modified_time=mod_dt,
         created_time=mod_dt,
-        is_directory=bool(row["is_directory"]) if "is_directory" in row.keys() else False
+        is_directory=bool(row["is_directory"]) if "is_directory" in row.keys() else False,
+        item_count=row["item_count"] if "item_count" in row.keys() else 0
     )
 
 def search_by_name(query: SearchQuery) -> List[Tuple[int, FileItem]]:
@@ -78,19 +80,23 @@ def search_by_name(query: SearchQuery) -> List[Tuple[int, FileItem]]:
     results = []
     for row in db_results:
         item = _row_to_file_item(row)
-        name = item.name
 
         if query.has_name_query:
             pat = query.name_query
-            if query.name_mode == 'exact':
-                match = (name == pat) if query.name_case_sensitive else (name.lower() == pat.lower())
-            elif query.name_mode == 'wildcard':
-                match = wildcard_match(name, pat, query.name_case_sensitive)
+            if item.is_directory:
+                match_name = item.name
             else:
-                match = fuzzy_match(name, pat, query.name_case_sensitive)
+                match_name = os.path.splitext(item.name)[0]
+
+            if query.name_mode == 'exact':
+                match = (match_name == pat) if query.name_case_sensitive else (match_name.lower() == pat.lower())
+            elif query.name_mode == 'wildcard':
+                match = wildcard_match(match_name, pat, query.name_case_sensitive)
+            else:
+                match = True
 
             if match:
-                score = _calculate_name_relevance(name, pat, query.name_case_sensitive)
+                score = _calculate_name_relevance(match_name, pat, query.name_case_sensitive)
                 results.append((score, item))
         else:
             results.append((0, item))

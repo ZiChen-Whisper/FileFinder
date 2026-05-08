@@ -1,13 +1,14 @@
 import os
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QStatusBar,
-                             QLabel, QHBoxLayout, QMessageBox)
-from PySide6.QtCore import Qt, QThread, Signal
+                             QLabel, QHBoxLayout, QMessageBox, QSplitter)
+from PySide6.QtCore import Qt, QThread, Signal, QTimer
 from PySide6.QtGui import QIcon, QAction
 from models.search_query import SearchQuery
 from core.search_engine import SearchEngine
-from .widgets import SearchBar, ResultListWidget, FilterBar, PreviewPanel
+from .widgets import SearchBar, ResultListWidget, FilterBar, PreviewPanel, RoundedMenu
 from .dialogs import SettingsDialog
 from config import get_exclude_dirs, get_max_results
+
 
 STATUS_BAR_STYLE = """
     QStatusBar {
@@ -59,6 +60,7 @@ class ScanWorker(QThread):
             total_files = 0
             batch = []
             batch_size = 500
+            dir_sizes = {}
 
             normalized_dirs = [normalize_path(d) for d in self._search_dirs]
 
@@ -75,8 +77,19 @@ class ScanWorker(QThread):
                     for d in dirs:
                         try:
                             dir_path = os.path.join(root, d)
-                            batch.append((dir_path, d, None, 0, 0, 1))
+                            try:
+                                dir_items = os.listdir(dir_path)
+                                item_count = len(dir_items)
+                            except (PermissionError, OSError):
+                                item_count = 0
+                            try:
+                                dir_stat = os.stat(dir_path)
+                                dir_mtime = dir_stat.st_mtime
+                            except (PermissionError, OSError):
+                                dir_mtime = 0
+                            batch.append((dir_path, d, None, 0, dir_mtime, 1, item_count))
                             total_files += 1
+                            dir_sizes.setdefault(dir_path, 0)
                         except Exception:
                             continue
 
@@ -92,9 +105,14 @@ class ScanWorker(QThread):
                                 ext.lower() if ext else None,
                                 stat.st_size,
                                 stat.st_mtime,
+                                0,
                                 0
                             ))
                             total_files += 1
+
+                            parent = root
+                            dir_sizes.setdefault(parent, 0)
+                            dir_sizes[parent] += stat.st_size
 
                             if len(batch) >= batch_size:
                                 db.insert_file_batch(batch)
@@ -105,6 +123,16 @@ class ScanWorker(QThread):
 
             if batch:
                 db.insert_file_batch(batch)
+
+            all_dirs_sorted = sorted(dir_sizes.keys(), key=lambda p: -p.count(os.sep))
+            for dir_path in all_dirs_sorted:
+                parent = os.path.dirname(dir_path)
+                if parent and parent != dir_path:
+                    dir_sizes.setdefault(parent, 0)
+                    dir_sizes[parent] += dir_sizes[dir_path]
+
+            if dir_sizes:
+                db.update_folder_sizes(dir_sizes)
 
             elapsed = time.time() - start_time
             self.finished.emit(total_files, elapsed)
@@ -138,6 +166,7 @@ class MainWindow(QMainWindow):
         self._search_worker = None
         self._current_file_types = []
         self._exclude_known_types = False
+        self._all_results = []
         self._init_ui()
         self._connect_signals()
         self._check_index_on_startup()
@@ -173,20 +202,30 @@ class MainWindow(QMainWindow):
         self.filter_bar = FilterBar()
         main_layout.addWidget(self.filter_bar)
 
-        content_split = QHBoxLayout()
+        content_split = QSplitter(Qt.Orientation.Horizontal)
         content_split.setContentsMargins(0, 0, 0, 0)
-        content_split.setSpacing(0)
 
         self.result_list = ResultListWidget()
 
         self.preview_panel = PreviewPanel()
+        self.preview_panel.setMinimumWidth(200)
 
-        content_split.addWidget(self.result_list, 3)
-        content_split.addWidget(self.preview_panel, 2)
+        content_split.addWidget(self.result_list)
+        content_split.addWidget(self.preview_panel)
+        content_split.setStretchFactor(0, 3)
+        content_split.setStretchFactor(1, 2)
+        content_split.setSizes([700, 400])
+        content_split.setHandleWidth(2)
+        content_split.setStyleSheet("""
+            QSplitter::handle {
+                background-color: #E5E7EB;
+            }
+            QSplitter::handle:hover {
+                background-color: #7C3AED;
+            }
+        """)
 
-        content_wrapper = QWidget()
-        content_wrapper.setLayout(content_split)
-        main_layout.addWidget(content_wrapper, 1)
+        main_layout.addWidget(content_split, 1)
 
         self._init_status_bar()
 
@@ -248,41 +287,55 @@ class MainWindow(QMainWindow):
                 color: #1F2937;
             }
             QMenu {
-                background-color: #FFFFFF;
-                border: 1px solid #E5E7EB;
-                border-radius: 8px;
-                padding: 4px;
+                background-color: transparent;
+                border: none;
+                padding: 0px;
             }
             QMenu::item {
-                padding: 6px 24px 6px 12px;
-                border-radius: 4px;
+                padding: 8px 32px 8px 36px;
+                border-radius: 8px;
                 font-size: 13px;
                 color: #1F2937;
+                background: transparent;
             }
             QMenu::item:selected {
                 background-color: #F5F3FF;
                 color: #7C3AED;
             }
+            QMenu::icon {
+                padding-left: 10px;
+            }
+            QMenu::separator {
+                height: 1px;
+                background: #E5E7EB;
+                margin: 3px 8px;
+            }
         """)
 
-        file_menu = menubar.addMenu("文件")
-        scan_action = QAction("重新扫描", self)
+        file_menu = RoundedMenu(self)
+        file_menu.setTitle("文件")
+        scan_action = QAction(QIcon("icons/refresh.svg"), "重新扫描", self)
         scan_action.triggered.connect(self._on_scan_requested)
         file_menu.addAction(scan_action)
         file_menu.addSeparator()
         exit_action = QAction("退出", self)
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
+        menubar.addMenu(file_menu)
 
-        settings_menu = menubar.addMenu("设置")
-        preferences_action = QAction("偏好设置", self)
+        settings_menu = RoundedMenu(self)
+        settings_menu.setTitle("设置")
+        preferences_action = QAction(QIcon("icons/settings.svg"), "偏好设置", self)
         preferences_action.triggered.connect(self._on_open_settings)
         settings_menu.addAction(preferences_action)
+        menubar.addMenu(settings_menu)
 
-        help_menu = menubar.addMenu("帮助")
+        help_menu = RoundedMenu(self)
+        help_menu.setTitle("帮助")
         about_action = QAction("关于", self)
         about_action.triggered.connect(self._on_about)
         help_menu.addAction(about_action)
+        menubar.addMenu(help_menu)
 
     def _on_open_settings(self):
         dialog = SettingsDialog(self)
@@ -302,6 +355,9 @@ class MainWindow(QMainWindow):
         self.filter_bar.scan_requested.connect(self._on_scan_requested)
 
     def _check_index_on_startup(self):
+        QTimer.singleShot(50, self._deferred_index_check)
+
+    def _deferred_index_check(self):
         self.filter_bar._check_index()
         count = self.filter_bar.get_indexed_count()
         if count == 0:
@@ -366,12 +422,6 @@ class MainWindow(QMainWindow):
 
         case_sensitive = self.search_bar.is_case_sensitive()
 
-        file_types = list(self._current_file_types) if self._current_file_types else []
-        exclude_file_types = []
-        if self._exclude_known_types:
-            from models.file_item import FILE_TYPE_MAP
-            exclude_file_types = list(FILE_TYPE_MAP.keys())
-
         query = SearchQuery(
             name_query=name_query if name_query else None,
             content_query=content_query if content_query else None,
@@ -381,25 +431,46 @@ class MainWindow(QMainWindow):
             max_results=get_max_results(),
             name_case_sensitive=case_sensitive,
             content_case_sensitive=case_sensitive,
-            file_types=file_types,
-            exclude_file_types=exclude_file_types
+            file_types=[],
+            exclude_file_types=[]
         )
 
         self.status_left.setText("正在搜索...")
         self.status_right.setText("")
         self.result_list.clear_results()
+        self.result_list.show_search_progress("正在搜索...")
 
         self._search_worker = SearchWorker(query)
         self._search_worker.finished.connect(self._on_search_finished)
         self._search_worker.start()
 
     def _on_search_finished(self, results):
-        self.result_list.clear_results()
+        self._all_results = results
+        self._apply_current_filter()
 
-        for result in results:
+    def _apply_current_filter(self):
+        self.result_list.hide_search_progress()
+
+        filtered = self._all_results
+
+        if self._exclude_known_types:
+            from models.file_item import FILE_TYPE_MAP
+            known_exts = set(FILE_TYPE_MAP.keys())
+            filtered = [r for r in filtered
+                       if r.file_item.extension.lower() not in known_exts
+                       and not r.file_item.is_directory]
+        elif self._current_file_types:
+            filtered = [r for r in filtered
+                       if r.file_item.extension.lower() in self._current_file_types
+                       and not r.file_item.is_directory]
+        elif self.filter_bar.get_selected_category() == 'folder':
+            filtered = [r for r in filtered if r.file_item.is_directory]
+
+        self.result_list.clear_results()
+        for result in filtered:
             self.result_list.add_result(result)
 
-        count = len(results)
+        count = len(filtered)
         if count == 0:
             self.status_left.setText("未找到匹配的文件")
             self.status_right.setText("")
@@ -429,14 +500,15 @@ class MainWindow(QMainWindow):
         self._exclude_known_types = False
         if category == 'other':
             self._exclude_known_types = True
+        elif category == 'folder':
+            pass
         elif category != 'all':
             for ext, ftype in FILE_TYPE_MAP.items():
                 if ftype == category:
                     self._current_file_types.append(ext)
 
-        text = self.search_bar.search_input.text().strip()
-        if text:
-            self._on_search(text, "")
+        if self._all_results:
+            self._apply_current_filter()
 
     def _on_scope_changed(self, dirs):
         pass

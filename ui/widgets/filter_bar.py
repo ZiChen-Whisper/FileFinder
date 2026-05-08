@@ -1,7 +1,6 @@
 import os
-import threading
 from PySide6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QPushButton,
-                             QLabel, QDialog, QListWidget, QLineEdit, QDialogButtonBox,
+                             QLabel, QDialog, QListWidget, QLineEdit,
                              QFileDialog, QMessageBox, QProgressBar, QSizePolicy)
 from PySide6.QtCore import Signal, Qt, QPropertyAnimation, QEasingCurve, QSize
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QFont
@@ -57,9 +56,9 @@ CONFIG_BTN_STYLE = BTN_BASE + """
     }
 """
 
-SCAN_BTN_STYLE = BTN_BASE + """
+SCAN_BTN_STYLE = """
     QPushButton {
-        padding: 0px 14px;
+        padding: 6px 14px;
         border-radius: 8px;
         border: none;
         background-color: #7C3AED;
@@ -328,10 +327,52 @@ class SearchScopeDialog(QDialog):
         quick_add_row.addStretch()
         layout.addLayout(quick_add_row)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+
+        cancel_btn = QPushButton("取消")
+        cancel_btn.setStyleSheet("""
+            QPushButton {
+                padding: 8px 24px;
+                border-radius: 8px;
+                border: 1px solid #E5E7EB;
+                background-color: #FFFFFF;
+                color: #4B5563;
+                font-size: 13px;
+                outline: none;
+            }
+            QPushButton:hover {
+                background-color: #F3F4F6;
+                border-color: #D1D5DB;
+            }
+        """)
+        cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        cancel_btn.clicked.connect(self.reject)
+
+        confirm_btn = QPushButton("确定")
+        confirm_btn.setStyleSheet("""
+            QPushButton {
+                padding: 8px 24px;
+                border-radius: 8px;
+                border: none;
+                background-color: #7C3AED;
+                color: #FFFFFF;
+                font-size: 13px;
+                font-weight: bold;
+                outline: none;
+            }
+            QPushButton:hover {
+                background-color: #6D28D9;
+            }
+        """)
+        confirm_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        confirm_btn.clicked.connect(self.accept)
+
+        btn_row.addWidget(cancel_btn)
+        btn_row.addSpacing(8)
+        btn_row.addWidget(confirm_btn)
+
+        layout.addLayout(btn_row)
 
         self.setLayout(layout)
 
@@ -381,10 +422,8 @@ class FilterBar(QWidget):
         self._search_dirs = []
         self._indexed_count = 0
         self._is_scanning = False
-        self._scan_thread = None
         self._init_ui()
         self._reload_scope()
-        self._check_index()
 
     def _reload_scope(self):
         from config import get_default_search_dirs
@@ -464,11 +503,11 @@ class FilterBar(QWidget):
         self.scope_label = QLabel()
         self.scope_label.setStyleSheet("font-size: 12px; color: #6B7280; padding: 4px 0; border: none; background: transparent; text-decoration: none;")
 
-        purple_settings = _make_colored_icon("icons/settings.svg", "#7C3AED", 14)
+        purple_settings = _make_colored_icon("icons/settings.svg", "#7C3AED", 16)
         self.configure_btn = QPushButton()
         self.configure_btn.setIcon(purple_settings)
-        self.configure_btn.setIconSize(QSize(14, 14))
-        self.configure_btn.setFixedSize(28, 28)
+        self.configure_btn.setIconSize(QSize(18, 18))
+        self.configure_btn.setFixedSize(32, 32)
         self.configure_btn.setStyleSheet("""
             QPushButton {
                 border: none;
@@ -493,24 +532,24 @@ class FilterBar(QWidget):
         self.progress_bar.setValue(0)
 
         white_refresh = _make_colored_icon("icons/refresh.svg", "#FFFFFF", 14)
-        self.scan_btn = AnimatedButton()
+        self.scan_btn = QPushButton()
         self.scan_btn.setIcon(white_refresh)
-        self.scan_btn.setIconSize(QSize(14, 14))
-        self.scan_btn.setText("重新扫描")
+        self.scan_btn.setIconSize(QSize(16, 16))
+        self.scan_btn.setText(" 重新扫描")
         self.scan_btn.setStyleSheet(SCAN_BTN_STYLE)
         self.scan_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.scan_btn.setFixedWidth(112)
+        self.scan_btn.setFixedWidth(116)
         self.scan_btn.clicked.connect(self._on_scan_clicked)
 
-        top_row.addWidget(self.status_dot)
+        top_row.addWidget(self.status_dot, 0, Qt.AlignmentFlag.AlignVCenter)
         top_row.addSpacing(4)
-        top_row.addWidget(self.scope_label)
+        top_row.addWidget(self.scope_label, 0, Qt.AlignmentFlag.AlignVCenter)
         top_row.addSpacing(4)
-        top_row.addWidget(self.configure_btn)
+        top_row.addWidget(self.configure_btn, 0, Qt.AlignmentFlag.AlignVCenter)
         top_row.addSpacing(6)
-        top_row.addWidget(self.progress_bar)
+        top_row.addWidget(self.progress_bar, 0, Qt.AlignmentFlag.AlignVCenter)
         top_row.addSpacing(4)
-        top_row.addWidget(self.scan_btn)
+        top_row.addWidget(self.scan_btn, 0, Qt.AlignmentFlag.AlignVCenter)
 
         main_layout.addLayout(top_row)
         self.setLayout(main_layout)
@@ -554,81 +593,20 @@ class FilterBar(QWidget):
         self._is_scanning = True
         self.scan_btn.setEnabled(False)
         self.scan_btn.setIcon(QIcon())
-        self.scan_btn.setText(" 扫描中...")
+        self.scan_btn.setText("扫描中...")
         self.progress_bar.setVisible(True)
         self.progress_bar.setValue(0)
         self.scan_requested.emit()
-
-        self._scan_thread = threading.Thread(target=self._scan_files, daemon=True)
-        self._scan_thread.start()
-
-    def _scan_files(self):
-        try:
-            db = DatabaseManager()
-            db.clear_index()
-
-            exclude_dirs = ['node_modules', '__pycache__', '.git', '.svn', '.hg',
-                          '.venv', 'venv', '.tox', '.eggs', 'build', 'dist',
-                          '.idea', '.vscode', '.vs', '$RECYCLE.BIN',
-                          'System Volume Information', 'Windows', 'Program Files',
-                          'Program Files (x86)', 'ProgramData']
-
-            total_files = 0
-            batch = []
-            batch_size = 500
-
-            normalized_dirs = [normalize_path(d) for d in self._search_dirs]
-
-            for base_dir in normalized_dirs:
-                if not os.path.isdir(base_dir):
-                    continue
-
-                for root, dirs, files in os.walk(base_dir):
-                    dirs[:] = [d for d in dirs if d not in exclude_dirs
-                              and not d.startswith('.')
-                              and not d.startswith('$')]
-
-                    for d in dirs:
-                        try:
-                            dir_path = os.path.join(root, d)
-                            batch.append((dir_path, d, None, 0, 0, 1))
-                            total_files += 1
-                        except Exception:
-                            continue
-
-                    for filename in files:
-                        try:
-                            file_path = os.path.join(root, filename)
-                            stat = os.stat(file_path)
-                            _, ext = os.path.splitext(filename)
-
-                            batch.append((
-                                file_path, filename,
-                                ext.lower() if ext else None,
-                                stat.st_size, stat.st_mtime, 0
-                            ))
-                            total_files += 1
-
-                            if len(batch) >= batch_size:
-                                db.insert_file_batch(batch)
-                                batch.clear()
-                        except Exception:
-                            continue
-
-            if batch:
-                db.insert_file_batch(batch)
-
-            self._indexed_count = total_files
-        except Exception:
-            pass
 
     def reset_scan_state(self, file_count: int = 0):
         self._is_scanning = False
         self.scan_btn.setEnabled(True)
         white_refresh = _make_colored_icon("icons/refresh.svg", "#FFFFFF", 14)
         self.scan_btn.setIcon(white_refresh)
-        self.scan_btn.setIconSize(QSize(14, 14))
-        self.scan_btn.setText("重新扫描")
+        self.scan_btn.setIconSize(QSize(16, 16))
+        self.scan_btn.setStyleSheet(SCAN_BTN_STYLE)
+        self.scan_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.scan_btn.setText(" 重新扫描")
         self.progress_bar.setVisible(False)
         self._indexed_count = file_count
         self._update_scope_label()
@@ -645,3 +623,12 @@ class FilterBar(QWidget):
 
     def is_scanning(self):
         return self._is_scanning
+
+    def show_search_progress(self):
+        self.progress_bar.setMinimum(0)
+        self.progress_bar.setMaximum(0)
+        self.progress_bar.setVisible(True)
+
+    def hide_search_progress(self):
+        self.progress_bar.setMaximum(100)
+        self.progress_bar.setVisible(False)
