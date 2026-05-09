@@ -453,10 +453,11 @@ class SettingsDialog(QDialog):
             "  \u2022 所有已扫描目录的记录\n"
             "  \u2022 所有用户偏好设置\n"
             "  \u2022 搜索历史记录\n"
-            "  \u2022 文件索引数据库\n\n"
+            "  \u2022 文件索引数据库\n"
+            "  \u2022 自定义搜索范围\n\n"
             "此操作不可恢复！确定要继续吗？",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        ).exec()
+        )
         if reply == QMessageBox.StandardButton.Yes:
             self.reset_requested.emit()
             self.accept()

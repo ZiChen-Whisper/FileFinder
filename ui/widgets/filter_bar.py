@@ -2,7 +2,7 @@ import os
 from PySide6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QPushButton,
                              QLabel, QDialog, QListWidget, QListWidgetItem,
                              QMessageBox, QProgressBar, QSizePolicy, QLineEdit,
-                             QFileDialog, QFrame)
+                             QFileDialog, QFrame, QApplication)
 from PySide6.QtCore import Signal, Qt, QPropertyAnimation, QEasingCurve, QSize, QPointF, QRectF
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QPen, QFont, QPolygonF
 from constants import FILE_TYPE_CATEGORIES
@@ -302,12 +302,15 @@ PROGRESS_STYLE = """
 
 
 def _make_colored_icon(icon_path: str, color_hex: str, size: int = 16) -> QIcon:
-    source_size = size * 8
+    screen = QApplication.primaryScreen()
+    dpr = screen.devicePixelRatio() if screen else 1.0
+    source_size = int(size * 8 * dpr)
     pixmap = QIcon(icon_path).pixmap(QSize(source_size, source_size))
     if pixmap.isNull():
         return QIcon(icon_path)
     colored = QPixmap(pixmap.size())
     colored.fill(Qt.GlobalColor.transparent)
+    colored.setDevicePixelRatio(dpr)
     painter = QPainter(colored)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
     painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
@@ -315,7 +318,9 @@ def _make_colored_icon(icon_path: str, color_hex: str, size: int = 16) -> QIcon:
     painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
     painter.fillRect(colored.rect(), QColor(color_hex))
     painter.end()
-    scaled = colored.scaled(size * 4, size * 4, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+    target_size = int(size * 4 * dpr)
+    scaled = colored.scaled(target_size, target_size, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+    scaled.setDevicePixelRatio(dpr)
     return QIcon(scaled)
 
 
@@ -870,10 +875,7 @@ class FilterBar(QWidget):
     def _update_scope_label(self):
         parts = []
         dir_count = len(self._search_dirs)
-        if dir_count == 1:
-            parts.append(f"{self._search_dirs[0]}")
-        else:
-            parts.append(f"{dir_count} 个目录")
+        parts.append(f"{dir_count} 个目录")
 
         if self._indexed_count > 0:
             parts.append(f" | 已索引 {self._indexed_count:,} 个文件")
@@ -881,59 +883,6 @@ class FilterBar(QWidget):
             parts.append(" | 未扫描")
 
         self.scope_label.setText("  ".join(parts))
-        self._update_dir_tags()
-
-    def _update_dir_tags(self):
-        while self._dir_tags_layout.count():
-            item = self._dir_tags_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-
-        if not self._scanned_dirs:
-            self._dir_tags_container.setVisible(False)
-            return
-
-        self._dir_tags_container.setVisible(True)
-        max_show = 5
-        dirs_to_show = self._scanned_dirs[:max_show]
-
-        TAG_STYLE = """
-            QLabel {
-                padding: 2px 10px;
-                border-radius: 10px;
-                background-color: #F3F0FF;
-                color: #7C3AED;
-                font-size: 11px;
-                border: 1px solid #E9DFFF;
-                text-decoration: none;
-            }
-        """
-
-        for d in dirs_to_show:
-            name = os.path.basename(d.rstrip(os.sep)) or d
-            tag = QLabel(name)
-            tag.setStyleSheet(TAG_STYLE)
-            tag.setToolTip(d)
-            self._dir_tags_layout.addWidget(tag)
-
-        remaining = len(self._scanned_dirs) - max_show
-        if remaining > 0:
-            more = QLabel(f"+{remaining}")
-            more.setStyleSheet("""
-                QLabel {
-                    padding: 2px 10px;
-                    border-radius: 10px;
-                    background-color: #F3F4F6;
-                    color: #6B7280;
-                    font-size: 11px;
-                    border: 1px solid #E5E7EB;
-                    text-decoration: none;
-                }
-            """)
-            more.setToolTip("\n".join(self._scanned_dirs[max_show:]))
-            self._dir_tags_layout.addWidget(more)
-
-        self._dir_tags_layout.addStretch()
 
     def _update_status_dot(self):
         if self._indexed_count == 0:
@@ -985,7 +934,7 @@ class FilterBar(QWidget):
             self.scan_btn.setStyleSheet(SCAN_BTN_GREEN_STYLE)
             self.scan_btn.setFixedWidth(86)
         elif self._has_unscanned_dirs():
-            self.scan_btn.setText("扫描新增")
+            self.scan_btn.setText("扫描新增路径")
             self.scan_btn.setStyleSheet(SCAN_BTN_GREEN_STYLE)
             self.scan_btn.setFixedWidth(86)
         else:
@@ -1021,17 +970,17 @@ class FilterBar(QWidget):
         self.scope_label = QLabel()
         self.scope_label.setStyleSheet("font-size: 12px; color: #6B7280; padding: 4px 0; border: none; background: transparent; text-decoration: none;")
 
-        gray_settings = _make_colored_icon("icons/settings.svg", "#6B7280", 32)
+        gray_settings = _make_colored_icon("icons/settings.svg", "#6B7280", 16)
         self.configure_btn = QPushButton()
         self.configure_btn.setIcon(gray_settings)
-        self.configure_btn.setIconSize(QSize(32, 32))
-        self.configure_btn.setFixedSize(32, 32)
+        self.configure_btn.setIconSize(QSize(16, 16))
+        self.configure_btn.setFixedSize(28, 28)
         self.configure_btn.setStyleSheet("""
             QPushButton {
                 border: none;
                 background: transparent;
                 outline: none;
-                padding: 7px;
+                padding: 4px;
             }
             QPushButton:hover {
                 background-color: #E5E7EB;
@@ -1074,17 +1023,7 @@ class FilterBar(QWidget):
         top_row.addSpacing(6)
         top_row.addWidget(self.scan_btn, 0, Qt.AlignmentFlag.AlignVCenter)
 
-        self._dir_tags_layout = QHBoxLayout()
-        self._dir_tags_layout.setSpacing(6)
-        self._dir_tags_layout.setContentsMargins(0, 0, 0, 0)
-
-        self._dir_tags_container = QWidget()
-        self._dir_tags_container.setLayout(self._dir_tags_layout)
-        self._dir_tags_container.setStyleSheet("background: transparent; border: none;")
-        self._dir_tags_container.setVisible(False)
-
         main_layout.addLayout(top_row)
-        main_layout.addWidget(self._dir_tags_container)
         main_layout.addWidget(self.progress_bar)
         self.setLayout(main_layout)
         self.setStyleSheet("""
@@ -1108,7 +1047,7 @@ class FilterBar(QWidget):
                 _styled_msg_box(
                     self, QMessageBox.Icon.Warning,
                     "配置错误", "扫描路径不能为空"
-                ).exec()
+                )
                 return
             old_dirs = set(self._search_dirs)
             self._search_dirs = new_dirs
@@ -1135,7 +1074,7 @@ class FilterBar(QWidget):
                     self, QMessageBox.Icon.Information,
                     "路径已更新",
                     f"扫描路径已更新（{'，'.join(msg_parts)}）。\n请点击「重新扫描」以更新文件索引。"
-                ).exec()
+                )
 
     def _on_scan_clicked(self):
         if self._is_scanning:

@@ -382,6 +382,7 @@ class ScanWorker(QThread):
         self._exclude_dirs = set(exclude_dirs) if exclude_dirs else set()
         self._cancelled = False
         self._last_progress_time = 0
+        self._progress_interval = 0.3
 
     def cancel(self):
         self._cancelled = True
@@ -407,11 +408,13 @@ class ScanWorker(QThread):
             if not os.path.isdir(base_dir):
                 continue
             try:
-                for root, dirs, files in os.walk(base_dir):
+                for root, dirs, files in os.walk(base_dir, onerror=lambda e: None):
                     if self._cancelled:
                         return 0
                     dirs[:] = [d for d in dirs if not self._should_skip_dir(d)]
                     total += len(files) + len(dirs)
+                    if total % 5000 == 0:
+                        self.progress.emit(total, -1)
             except Exception:
                 continue
         return total
@@ -438,7 +441,6 @@ class ScanWorker(QThread):
             batch = []
             batch_size = 500
             dir_sizes = {}
-            progress_interval = 0.3
             last_batch_count = 0
 
             for base_dir in normalized_dirs:
@@ -447,7 +449,7 @@ class ScanWorker(QThread):
                 if not os.path.isdir(base_dir):
                     continue
 
-                for root, dirs, files in os.walk(base_dir):
+                for root, dirs, files in os.walk(base_dir, onerror=lambda e: None):
                     if self._cancelled:
                         break
                     dirs[:] = [d for d in dirs if not self._should_skip_dir(d)]
@@ -500,7 +502,7 @@ class ScanWorker(QThread):
                                 db.insert_file_batch(batch)
                                 batch.clear()
                                 now = time.time()
-                                if now - self._last_progress_time >= progress_interval:
+                                if now - self._last_progress_time >= self._progress_interval:
                                     self._last_progress_time = now
                                     if estimated_total > 0:
                                         pct = min(int(total_files / estimated_total * 95), 95)
@@ -960,7 +962,9 @@ class SearchScopePanel(QWidget):
         super().__init__(parent)
         self._scanned_dirs = []
         self._selected_dirs = set()
+        self._custom_dir_list = []
         self._scope_mode = 'all'
+        self._indexed_count = 0
         self._init_ui()
 
     def _init_ui(self):
@@ -974,7 +978,7 @@ class SearchScopePanel(QWidget):
         header = QLabel("搜索范围：")
         header.setStyleSheet("font-size: 12px; font-weight: bold; color: #374151; border: none; background: transparent;")
 
-        self._all_btn = QPushButton("全部")
+        self._all_btn = QPushButton("全部已扫描目录")
         self._all_btn.setCheckable(True)
         self._all_btn.setChecked(True)
         self._all_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -1003,17 +1007,40 @@ class SearchScopePanel(QWidget):
         """)
         self._all_btn.clicked.connect(self._on_all_clicked)
 
-        self._custom_btn = QPushButton("自定义")
+        self._custom_btn = QPushButton("自定义范围")
         self._custom_btn.setCheckable(True)
         self._custom_btn.setChecked(False)
         self._custom_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._custom_btn.setStyleSheet(self._all_btn.styleSheet())
         self._custom_btn.clicked.connect(self._on_custom_clicked)
 
+        self._scope_info_scroll = QScrollArea()
+        self._scope_info_scroll.setWidgetResizable(True)
+        self._scope_info_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._scope_info_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self._scope_info_scroll.setFixedHeight(56)
+        self._scope_info_scroll.setMinimumWidth(120)
+        self._scope_info_scroll.setMaximumWidth(220)
+        self._scope_info_scroll.setStyleSheet("""
+            QScrollArea {
+                border: 1px solid #E5E7EB;
+                border-radius: 6px;
+                background-color: #FAFAFA;
+            }
+        """ + SCROLLBAR_STYLE)
+        self._scope_info_container = QWidget()
+        self._scope_info_layout = QVBoxLayout(self._scope_info_container)
+        self._scope_info_layout.setContentsMargins(6, 4, 6, 4)
+        self._scope_info_layout.setSpacing(2)
+        self._scope_info_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self._scope_info_container.setStyleSheet("QWidget { background: transparent; }")
+        self._scope_info_scroll.setWidget(self._scope_info_container)
+
         header_row.addWidget(header)
         header_row.addWidget(self._all_btn)
         header_row.addWidget(self._custom_btn)
         header_row.addStretch()
+        header_row.addWidget(self._scope_info_scroll)
 
         self._scope_detail = QLabel("")
         self._scope_detail.setStyleSheet("font-size: 12px; color: #6B7280; border: none; background: transparent; text-decoration: none;")
@@ -1047,20 +1074,60 @@ class SearchScopePanel(QWidget):
             }
         """)
 
+    def _get_display_path(self, path: str) -> str:
+        path_clean = path.rstrip(os.sep)
+        for scan_dir in self._scanned_dirs:
+            scan_clean = scan_dir.rstrip(os.sep)
+            if os.path.normcase(os.path.normpath(path_clean)) == os.path.normcase(os.path.normpath(scan_clean)):
+                return os.path.basename(scan_clean) or scan_dir
+            try:
+                rel = os.path.relpath(path_clean, scan_clean)
+                if not rel.startswith('..'):
+                    return rel
+            except ValueError:
+                pass
+        return os.path.basename(path_clean) or path
+
     def set_scanned_dirs(self, dirs: list):
         self._scanned_dirs = list(dirs)
         if self._scope_mode == 'all':
             self._selected_dirs = set(dirs)
         self._rebuild_dir_buttons()
         self._update_scope_detail()
+        self._update_scope_info()
         self.scope_changed.emit(list(self._selected_dirs))
+
+    def update_scope_info(self, file_count: int = 0):
+        self._indexed_count = file_count
+        self._update_scope_info()
+
+    def _update_scope_info(self):
+        while self._scope_info_layout.count():
+            item = self._scope_info_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        dir_count = len(self._scanned_dirs)
+        if dir_count == 0:
+            return
+
+        header_label = QLabel(f"{dir_count} 个目录" + (f" · 已索引 {self._indexed_count:,} 个文件" if self._indexed_count > 0 else " · 未扫描"))
+        header_label.setStyleSheet("font-size: 10px; color: #9CA3AF; border: none; background: transparent; padding: 0px; margin: 0px;")
+        self._scope_info_layout.addWidget(header_label)
+
+        for d in self._scanned_dirs:
+            name = os.path.basename(d.rstrip(os.sep)) or d
+            dir_label = QLabel(name)
+            dir_label.setToolTip(d)
+            dir_label.setStyleSheet("font-size: 11px; color: #4B5563; border: none; background: transparent; padding: 1px 2px; margin: 0px;")
+            self._scope_info_layout.addWidget(dir_label)
 
     def _update_scope_detail(self):
         if self._scope_mode == 'all':
             self._scope_detail.setText(f"搜索所有已扫描目录（共 {len(self._scanned_dirs)} 个）")
         else:
             count = len(self._selected_dirs)
-            total = len(self._scanned_dirs)
+            total = len(self._custom_dir_list)
             self._scope_detail.setText(f"已选择 {count}/{total} 个目录")
 
     def _rebuild_dir_buttons(self):
@@ -1069,35 +1136,52 @@ class SearchScopePanel(QWidget):
             if item.widget():
                 item.widget().deleteLater()
 
-        for d in self._scanned_dirs:
-            btn = QPushButton(os.path.basename(d.rstrip(os.sep)) or d)
+        dirs_to_show = self._custom_dir_list if self._scope_mode == 'custom' else list(self._selected_dirs)
+        DIR_TAG_STYLE = """
+            QPushButton {
+                padding: 4px 10px;
+                border-radius: 8px;
+                border: 1px solid #E5E7EB;
+                background-color: #FFFFFF;
+                color: #6B7280;
+                font-size: 11px;
+                outline: none;
+                text-align: left;
+            }
+            QPushButton:hover {
+                background-color: #F3F4F6;
+                border-color: #D1D5DB;
+                color: #374151;
+            }
+            QPushButton:checked {
+                background-color: #7C3AED;
+                border-color: #7C3AED;
+                color: #FFFFFF;
+            }
+            QPushButton:checked:hover {
+                background-color: #6D28D9;
+                border-color: #6D28D9;
+            }
+            QPushButton:!checked {
+                border: 1px solid #E5E7EB;
+                background-color: #FFFFFF;
+                color: #6B7280;
+            }
+            QPushButton:!checked:hover {
+                background-color: #F3F4F6;
+                border-color: #D1D5DB;
+                color: #374151;
+            }
+        """
+        for d in dirs_to_show:
+            display_name = self._get_display_path(d)
+            btn = QPushButton(display_name)
             btn.setCheckable(True)
-            btn.setChecked(d in self._selected_dirs)
+            is_selected = d in self._selected_dirs
+            btn.setChecked(is_selected)
             btn.setToolTip(d)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setStyleSheet("""
-                QPushButton {
-                    padding: 4px 14px;
-                    border-radius: 8px;
-                    border: 1px solid #E5E7EB;
-                    background-color: #FFFFFF;
-                    color: #4B5563;
-                    font-size: 12px;
-                    outline: none;
-                }
-                QPushButton:hover {
-                    background-color: #F3F4F6;
-                    border-color: #D1D5DB;
-                }
-                QPushButton:checked {
-                    background-color: #7C3AED;
-                    border-color: #7C3AED;
-                    color: #FFFFFF;
-                }
-                QPushButton:checked:hover {
-                    background-color: #6D28D9;
-                }
-            """)
+            btn.setStyleSheet(DIR_TAG_STYLE)
             btn.clicked.connect(lambda checked, path=d: self._on_dir_toggled(path, checked))
             self._dir_layout.addWidget(btn)
 
@@ -1108,13 +1192,13 @@ class SearchScopePanel(QWidget):
         self._all_btn.setChecked(True)
         self._custom_btn.setChecked(False)
         self._selected_dirs = set(self._scanned_dirs)
+        self._custom_dir_list = []
         self._scroll.setVisible(False)
         self._rebuild_dir_buttons()
         self._update_scope_detail()
         self.scope_changed.emit(list(self._selected_dirs))
 
     def _on_custom_clicked(self):
-        self._scope_mode = 'custom'
         self._all_btn.setChecked(False)
         self._custom_btn.setChecked(True)
 
@@ -1123,7 +1207,7 @@ class SearchScopePanel(QWidget):
             selected = dialog.get_selected_dirs()
             unscanned = dialog.get_unscanned_dirs()
             if unscanned:
-                msg = _styled_msg_box(
+                reply = _styled_msg_box(
                     self, QMessageBox.Icon.Question,
                     "发现未扫描目录",
                     "以下目录尚未扫描：\n\n" +
@@ -1131,12 +1215,14 @@ class SearchScopePanel(QWidget):
                     "\n\n是否立即扫描这些目录？\n（选择\"取消\"则不会将这些目录加入搜索范围）",
                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
                 )
-                reply = msg.exec()
                 if reply == QMessageBox.StandardButton.Yes:
+                    self._scope_mode = 'custom'
                     self.scan_unscanned_requested.emit(unscanned)
                     return
 
+            self._scope_mode = 'custom'
             self._selected_dirs = set(selected)
+            self._custom_dir_list = list(selected)
             self._scroll.setVisible(True)
             self._rebuild_dir_buttons()
             self._update_scope_detail()
@@ -1144,6 +1230,10 @@ class SearchScopePanel(QWidget):
         else:
             if not self._selected_dirs:
                 self._on_all_clicked()
+            else:
+                self._scope_mode = 'custom'
+                self._all_btn.setChecked(False)
+                self._custom_btn.setChecked(True)
 
     def _on_dir_toggled(self, path: str, checked: bool):
         if checked:
@@ -1158,6 +1248,9 @@ class SearchScopePanel(QWidget):
             return list(self._scanned_dirs)
         return list(self._selected_dirs)
 
+    def get_all_scanned_dirs(self) -> list:
+        return list(self._scanned_dirs)
+
     def add_scanned_dir(self, dirs: list):
         for d in dirs:
             if d not in self._scanned_dirs:
@@ -1165,16 +1258,33 @@ class SearchScopePanel(QWidget):
             self._selected_dirs.add(d)
         self._rebuild_dir_buttons()
         self._update_scope_detail()
+        self._update_scope_info()
         self.scope_changed.emit(list(self._selected_dirs))
+
+    def reset(self):
+        self._scope_mode = 'all'
+        self._selected_dirs = set()
+        self._custom_dir_list = []
+        self._scanned_dirs = []
+        self._indexed_count = 0
+        self._all_btn.setChecked(True)
+        self._custom_btn.setChecked(False)
+        self._scroll.setVisible(False)
+        self._rebuild_dir_buttons()
+        self._update_scope_detail()
+        self._update_scope_info()
 
 
 class _ScopeSelectionDialog(QDialog):
+    _PLACEHOLDER_KEY = "__placeholder__"
+
     def __init__(self, scanned_dirs: list, current_selected: set, parent=None):
         super().__init__(parent)
         self._scanned_dirs = list(scanned_dirs)
         self._selected_dirs = set(current_selected)
         self._unscanned_dirs = []
         self._updating_tree = False
+        self._loaded_items = set()
         self.setWindowTitle("指定搜索范围")
         self.setMinimumSize(560, 540)
         self.setStyleSheet("QDialog { background-color: #FFFFFF; }")
@@ -1188,7 +1298,7 @@ class _ScopeSelectionDialog(QDialog):
         header = QLabel("指定搜索范围")
         header.setStyleSheet("font-size: 16px; font-weight: bold; color: #1F2937; border: none; background: transparent;")
 
-        desc = QLabel("勾选要搜索的目录。勾选父目录将自动包含所有子目录。")
+        desc = QLabel("勾选要搜索的目录。勾选父目录将自动包含所有子目录，部分勾选子目录时父目录显示为半选状态。")
         desc.setStyleSheet("font-size: 13px; color: #6B7280; border: none; background: transparent; text-decoration: none;")
         desc.setWordWrap(True)
 
@@ -1222,54 +1332,121 @@ class _ScopeSelectionDialog(QDialog):
         deselect_all_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         deselect_all_btn.clicked.connect(self._on_deselect_all)
 
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.VLine)
+        sep.setStyleSheet("color: #E5E7EB; border: none; background: transparent;")
+
+        expand_all_btn = QPushButton("全部展开")
+        expand_all_btn.setStyleSheet(CHECK_BTN_STYLE)
+        expand_all_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        expand_all_btn.clicked.connect(self._on_expand_all)
+
+        collapse_all_btn = QPushButton("全部折叠")
+        collapse_all_btn.setStyleSheet(CHECK_BTN_STYLE)
+        collapse_all_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        collapse_all_btn.clicked.connect(self._on_collapse_all)
+
         self._count_label = QLabel("")
         self._count_label.setStyleSheet("font-size: 12px; color: #9CA3AF; border: none; background: transparent;")
 
         select_row.addWidget(select_all_btn)
         select_row.addWidget(deselect_all_btn)
+        select_row.addWidget(sep)
+        select_row.addWidget(expand_all_btn)
+        select_row.addWidget(collapse_all_btn)
         select_row.addStretch()
         select_row.addWidget(self._count_label)
 
         self._tree = QTreeWidget()
         self._tree.setHeaderLabel("目录")
         self._tree.setAnimated(True)
-        self._tree.setIndentation(20)
+        self._tree.setIndentation(16)
         self._tree.setExpandsOnDoubleClick(True)
-        tree_style = """
-            QTreeWidget {
+
+        icons_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'icons')
+        checkmark_path = os.path.join(icons_dir, 'checkmark.svg').replace('\\', '/')
+        partial_path = os.path.join(icons_dir, 'partial-check.svg').replace('\\', '/')
+        branch_closed_path = os.path.join(icons_dir, 'branch-closed.svg').replace('\\', '/')
+        branch_open_path = os.path.join(icons_dir, 'branch-open.svg').replace('\\', '/')
+
+        tree_style = f"""
+            QTreeWidget {{
                 border: 1px solid #E5E7EB;
                 border-radius: 8px;
                 background-color: #FAFAFA;
                 font-size: 13px;
                 outline: none;
                 padding: 4px;
-            }
-            QTreeWidget::item {
+            }}
+            QTreeWidget::item {{
                 padding: 4px 2px;
                 border-radius: 4px;
                 border: none;
-            }
-            QTreeWidget::item:hover {
+            }}
+            QTreeWidget::item:hover {{
                 background-color: #F3F4F6;
-            }
-            QTreeWidget::item:selected {
+            }}
+            QTreeWidget::item:selected {{
                 background-color: #F5F3FF;
                 color: #1F2937;
-            }
-            QTreeWidget::branch {
+            }}
+            QTreeWidget::branch {{
                 background: transparent;
-            }
+            }}
+            QTreeWidget::branch:has-children:!closed {{
+                image: url({branch_open_path});
+                background: transparent;
+            }}
+            QTreeWidget::branch:closed:has-children {{
+                image: url({branch_closed_path});
+                background: transparent;
+            }}
+            QTreeWidget::indicator {{
+                width: 16px;
+                height: 16px;
+                border-radius: 4px;
+                border: 2px solid #D1D5DB;
+                background-color: #FFFFFF;
+            }}
+            QTreeWidget::indicator:hover {{
+                border-color: #7C3AED;
+                background-color: #F5F3FF;
+            }}
+            QTreeWidget::indicator:unchecked {{
+                image: none;
+            }}
+            QTreeWidget::indicator:checked {{
+                background-color: #7C3AED;
+                border-color: #7C3AED;
+                image: url({checkmark_path});
+            }}
+            QTreeWidget::indicator:checked:hover {{
+                background-color: #6D28D9;
+                border-color: #6D28D9;
+                image: url({checkmark_path});
+            }}
+            QTreeWidget::indicator:indeterminate {{
+                background-color: #7C3AED;
+                border-color: #7C3AED;
+                image: url({partial_path});
+            }}
+            QTreeWidget::indicator:indeterminate:hover {{
+                background-color: #6D28D9;
+                border-color: #6D28D9;
+                image: url({partial_path});
+            }}
         """ + SCROLLBAR_STYLE
         self._tree.setStyleSheet(tree_style)
         self._tree.header().setStretchLastSection(True)
         self._tree.itemChanged.connect(self._on_tree_item_changed)
+        self._tree.itemExpanded.connect(self._on_item_expanded)
         self._populate_tree()
 
         browse_row = QHBoxLayout()
         browse_row.setSpacing(8)
 
         self._path_input = QLineEdit()
-        self._path_input.setPlaceholderText("浏览或输入目录路径...")
+        self._path_input.setPlaceholderText("输入目录路径或点击浏览...")
         self._path_input.setFixedHeight(36)
         self._path_input.setStyleSheet("""
             QLineEdit {
@@ -1387,78 +1564,215 @@ class _ScopeSelectionDialog(QDialog):
     def _populate_tree(self):
         self._updating_tree = True
         self._tree.clear()
+        self._loaded_items.clear()
         for d in self._scanned_dirs:
-            parent_item = QTreeWidgetItem(self._tree, [os.path.basename(d.rstrip(os.sep)) or d])
-            parent_item.setCheckState(0, Qt.CheckState.Checked if d in self._selected_dirs else Qt.CheckState.Unchecked)
-            parent_item.setData(0, Qt.ItemDataRole.UserRole, d)
-            parent_item.setData(0, Qt.ItemDataRole.UserRole + 1, 'scanned')
-            parent_item.setToolTip(0, d)
-            self._add_subdirs(parent_item, d, depth=0)
+            name = os.path.basename(d.rstrip(os.sep)) or d
+            item = QTreeWidgetItem(self._tree, [name])
+            d_norm = os.path.normcase(os.path.normpath(d.rstrip(os.sep)))
+            if d in self._selected_dirs:
+                item.setCheckState(0, Qt.CheckState.Checked)
+            elif any(
+                os.path.normcase(os.path.normpath(s.rstrip(os.sep))).startswith(d_norm + os.sep)
+                for s in self._selected_dirs
+            ):
+                item.setCheckState(0, Qt.CheckState.PartiallyChecked)
+            else:
+                item.setCheckState(0, Qt.CheckState.Unchecked)
+            item.setData(0, Qt.ItemDataRole.UserRole, d)
+            item.setData(0, Qt.ItemDataRole.UserRole + 1, 'scanned')
+            item.setToolTip(0, d)
+            if self._has_subdirectories(d):
+                self._add_placeholder(item)
+            else:
+                item.setChildIndicatorPolicy(
+                    QTreeWidgetItem.ChildIndicatorPolicy.DontShowIndicator)
         self._updating_tree = False
         self._update_count_label()
 
-    def _add_subdirs(self, parent_item, dir_path, depth=0):
-        if depth >= 2:
+    def _has_subdirectories(self, dir_path: str) -> bool:
+        try:
+            for name in os.listdir(dir_path):
+                full = os.path.join(dir_path, name)
+                try:
+                    if os.path.isdir(full) and not os.path.islink(full):
+                        return True
+                except Exception:
+                    continue
+        except (PermissionError, OSError, TypeError):
+            return False
+        return False
+
+    def _add_placeholder(self, item: QTreeWidgetItem):
+        placeholder = QTreeWidgetItem(item, ["加载中..."])
+        placeholder.setData(0, Qt.ItemDataRole.UserRole, self._PLACEHOLDER_KEY)
+        placeholder.setFlags(Qt.ItemFlag.NoItemFlags)
+        placeholder.setForeground(0, QColor(156, 163, 175))
+
+    def _has_placeholder(self, item: QTreeWidgetItem) -> bool:
+        if item.childCount() == 0:
+            return False
+        first = item.child(0)
+        return first.data(0, Qt.ItemDataRole.UserRole) == self._PLACEHOLDER_KEY
+
+    def _on_item_expanded(self, item: QTreeWidgetItem):
+        if not self._has_placeholder(item):
             return
+        self._updating_tree = True
+        try:
+            item.takeChild(0)
+            dir_path = item.data(0, Qt.ItemDataRole.UserRole)
+            if not dir_path or not os.path.isdir(dir_path):
+                item.setChildIndicatorPolicy(
+                    QTreeWidgetItem.ChildIndicatorPolicy.DontShowIndicator)
+                self._updating_tree = False
+                return
+            parent_state = item.checkState(0)
+            self._load_children(item, dir_path)
+            if parent_state == Qt.CheckState.Checked:
+                for i in range(item.childCount()):
+                    self._cascade_check(item.child(i), True)
+            elif parent_state == Qt.CheckState.PartiallyChecked:
+                self._apply_partial_inherit(item)
+            self._loaded_items.add(id(item))
+        except Exception:
+            logger.debug("Error loading tree children", exc_info=True)
+        self._updating_tree = False
+        self._update_count_label()
+
+    def _load_children(self, parent_item: QTreeWidgetItem, dir_path: str):
         try:
             entries = sorted(os.listdir(dir_path))
-        except (PermissionError, OSError):
+        except (PermissionError, OSError, TypeError):
+            parent_item.setChildIndicatorPolicy(
+                QTreeWidgetItem.ChildIndicatorPolicy.DontShowIndicator)
             return
+        has_dirs = False
         for name in entries:
             full = os.path.join(dir_path, name)
             try:
-                if not os.path.isdir(full):
-                    continue
-                if os.path.islink(full):
+                if not os.path.isdir(full) or os.path.islink(full):
                     continue
             except Exception:
                 continue
+            has_dirs = True
             child = QTreeWidgetItem(parent_item, [name])
             child.setCheckState(0, Qt.CheckState.Unchecked)
             child.setData(0, Qt.ItemDataRole.UserRole, full)
             child.setData(0, Qt.ItemDataRole.UserRole + 1, 'scanned')
             child.setToolTip(0, full)
-            self._add_subdirs(child, full, depth + 1)
-        parent_item.setExpanded(depth == 0)
+            if self._has_subdirectories(full):
+                self._add_placeholder(child)
+            else:
+                child.setChildIndicatorPolicy(
+                    QTreeWidgetItem.ChildIndicatorPolicy.DontShowIndicator)
+        if not has_dirs:
+            parent_item.setChildIndicatorPolicy(
+                QTreeWidgetItem.ChildIndicatorPolicy.DontShowIndicator)
 
-    def _on_tree_item_changed(self, item, column):
+    def _cascade_check(self, item: QTreeWidgetItem, checked: bool):
+        item.setCheckState(0, Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
+        if not self._has_placeholder(item):
+            for i in range(item.childCount()):
+                self._cascade_check(item.child(i), checked)
+
+    def _apply_partial_inherit(self, item: QTreeWidgetItem):
+        for i in range(item.childCount()):
+            child = item.child(i)
+            child_path = child.data(0, Qt.ItemDataRole.UserRole) or ''
+            if child_path in self._selected_dirs:
+                child.setCheckState(0, Qt.CheckState.Checked)
+            else:
+                child.setCheckState(0, Qt.CheckState.Unchecked)
+
+    def _on_expand_all(self):
+        self._expand_queue = []
+        self._expand_depth = 0
+        root = self._tree.invisibleRootItem()
+        for i in range(root.childCount()):
+            self._expand_queue.append((root.child(i), 0))
+        if self._expand_queue:
+            self._count_label.setText("正在展开...")
+            self._expand_index = 0
+            self._expand_timer = QTimer(self)
+            self._expand_timer.timeout.connect(self._expand_next_batch)
+            self._expand_timer.start(0)
+
+    def _expand_next_batch(self):
+        batch_size = 15
+        new_queue = []
+        for _ in range(batch_size):
+            if self._expand_index >= len(self._expand_queue):
+                self._expand_queue = new_queue
+                self._expand_index = 0
+                if not self._expand_queue:
+                    self._expand_timer.stop()
+                    self._update_count_label()
+                    return
+                return
+            item, depth = self._expand_queue[self._expand_index]
+            self._expand_index += 1
+            if depth >= 3:
+                continue
+            self._tree.expandItem(item)
+            if not self._has_placeholder(item):
+                for i in range(item.childCount()):
+                    new_queue.append((item.child(i), depth + 1))
+        if self._expand_index >= len(self._expand_queue):
+            self._expand_queue = new_queue
+            self._expand_index = 0
+            if not self._expand_queue:
+                self._expand_timer.stop()
+                self._update_count_label()
+        QApplication.processEvents()
+
+    def _on_collapse_all(self):
+        self._collapse_all_items(self._tree.invisibleRootItem())
+
+    def _collapse_all_items(self, parent: QTreeWidgetItem):
+        for i in range(parent.childCount()):
+            child = parent.child(i)
+            self._collapse_all_items(child)
+            self._tree.collapseItem(child)
+
+    def _on_tree_item_changed(self, item: QTreeWidgetItem, column: int):
         if self._updating_tree:
             return
         self._updating_tree = True
-        check_state = item.checkState(0)
-        if check_state == Qt.CheckState.Checked or check_state == Qt.CheckState.Unchecked:
-            self._set_item_and_children_checked(item, check_state == Qt.CheckState.Checked)
+        state = item.checkState(0)
+        if state == Qt.CheckState.Checked:
+            self._cascade_check(item, True)
+        elif state == Qt.CheckState.Unchecked:
+            self._cascade_check(item, False)
         self._update_parent_check_state(item)
         self._updating_tree = False
         self._update_count_label()
 
-    def _update_parent_check_state(self, item):
+    def _update_parent_check_state(self, item: QTreeWidgetItem):
         parent = item.parent()
         if parent is None:
             return
         checked_count = 0
-        child_count = parent.childCount()
-        for i in range(child_count):
-            if parent.child(i).checkState(0) == Qt.CheckState.Checked:
+        partial_count = 0
+        total = parent.childCount()
+        for i in range(total):
+            cs = parent.child(i).checkState(0)
+            if cs == Qt.CheckState.Checked:
                 checked_count += 1
-        if checked_count == 0:
+            elif cs == Qt.CheckState.PartiallyChecked:
+                partial_count += 1
+        if checked_count == 0 and partial_count == 0:
             parent.setCheckState(0, Qt.CheckState.Unchecked)
-        elif checked_count == child_count:
+        elif checked_count == total:
             parent.setCheckState(0, Qt.CheckState.Checked)
         else:
             parent.setCheckState(0, Qt.CheckState.PartiallyChecked)
         self._update_parent_check_state(parent)
 
-    def _set_item_and_children_checked(self, item, checked):
-        item.setCheckState(0, Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
-        for i in range(item.childCount()):
-            self._set_item_and_children_checked(item.child(i), checked)
-
     def _on_select_all(self):
         self._updating_tree = True
         root = self._tree.invisibleRootItem()
         for i in range(root.childCount()):
-            self._set_item_and_children_checked(root.child(i), True)
+            self._cascade_check(root.child(i), True)
         self._updating_tree = False
         self._update_count_label()
 
@@ -1466,7 +1780,7 @@ class _ScopeSelectionDialog(QDialog):
         self._updating_tree = True
         root = self._tree.invisibleRootItem()
         for i in range(root.childCount()):
-            self._set_item_and_children_checked(root.child(i), False)
+            self._cascade_check(root.child(i), False)
         self._updating_tree = False
         self._update_count_label()
 
@@ -1475,19 +1789,18 @@ class _ScopeSelectionDialog(QDialog):
         total = 0
         root = self._tree.invisibleRootItem()
         for i in range(root.childCount()):
-            self._count_tree_items(root.child(i), lambda: None)
+            c = root.child(i)
             total += 1
-            if root.child(i).checkState(0) == Qt.CheckState.Checked:
+            if c.checkState(0) == Qt.CheckState.Checked:
                 checked += 1
         self._count_label.setText(f"已选 {checked}/{total} 个根目录")
 
-    def _count_tree_items(self, item, callback):
-        pass
-
     def _on_browse(self):
         path = QFileDialog.getExistingDirectory(self, "选择目录")
-        if path:
-            self._path_input.setText(path)
+        if not path:
+            return
+        self._path_input.setText(path)
+        self._add_path_to_tree(path)
 
     def _on_add(self):
         path = self._path_input.text().strip()
@@ -1497,18 +1810,31 @@ class _ScopeSelectionDialog(QDialog):
             _styled_msg_box(
                 self, QMessageBox.Icon.Warning,
                 "路径无效", f"目录不存在或无法访问：\n{path}"
-            ).exec()
+            )
             return
+        self._add_path_to_tree(path)
+        self._path_input.clear()
 
-        existing_item = self._find_tree_item_by_path(path)
-        if existing_item is not None:
+    def _add_path_to_tree(self, path: str):
+        existing = self._find_tree_item_by_path(path)
+        if existing is not None:
             self._updating_tree = True
-            existing_item.setCheckState(0, Qt.CheckState.Checked)
-            self._set_item_and_children_checked(existing_item, True)
-            self._update_parent_check_state(existing_item)
+            self._cascade_check(existing, True)
+            self._update_parent_check_state(existing)
             self._updating_tree = False
             self._update_count_label()
-            self._tree.scrollToItem(existing_item)
+            self._tree.scrollToItem(existing)
+            self._path_input.clear()
+            return
+
+        visible = self._ensure_path_visible(path)
+        if visible is not None:
+            self._updating_tree = True
+            self._cascade_check(visible, True)
+            self._update_parent_check_state(visible)
+            self._updating_tree = False
+            self._update_count_label()
+            self._tree.scrollToItem(visible)
             self._path_input.clear()
             return
 
@@ -1519,48 +1845,105 @@ class _ScopeSelectionDialog(QDialog):
             for d in self._scanned_dirs
         )
 
+        tag = 'scanned'
         if not is_scanned:
             reply = _styled_msg_box(
                 self, QMessageBox.Icon.Question,
                 "目录未扫描",
-                f"目录不在已扫描范围内：\n{path}\n\n是否添加到扫描路径并扫描？\n（选择\"否\"则仅添加到选择列表）",
+                f"目录不在已扫描范围内：\n{path}\n\n"
+                "是否添加到扫描路径并扫描？\n"
+                "（选择\"否\"则仅添加到选择列表，不会索引其中的文件）",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
             )
             if reply == QMessageBox.StandardButton.Yes:
                 self._unscanned_dirs.append(path)
                 self._scanned_dirs.append(path)
+                tag = 'unscanned'
 
         self._updating_tree = True
-        parent_item = QTreeWidgetItem(self._tree, [os.path.basename(path.rstrip(os.sep)) or path])
-        parent_item.setCheckState(0, Qt.CheckState.Checked)
-        parent_item.setData(0, Qt.ItemDataRole.UserRole, path)
-        parent_item.setData(0, Qt.ItemDataRole.UserRole + 1, 'scanned')
-        parent_item.setToolTip(0, path)
+        name = os.path.basename(path.rstrip(os.sep)) or path
+        item = QTreeWidgetItem(self._tree, [name])
+        item.setCheckState(0, Qt.CheckState.Checked)
+        item.setData(0, Qt.ItemDataRole.UserRole, path)
+        item.setData(0, Qt.ItemDataRole.UserRole + 1, tag)
+        item.setToolTip(0, path)
         if not is_scanned:
-            parent_item.setForeground(0, QColor(239, 68, 68))
-        self._add_subdirs(parent_item, path, depth=0)
-        self._tree.scrollToItem(parent_item)
+            item.setForeground(0, QColor(239, 68, 68))
+        if self._has_subdirectories(path):
+            self._add_placeholder(item)
+        else:
+            item.setChildIndicatorPolicy(
+                QTreeWidgetItem.ChildIndicatorPolicy.DontShowIndicator)
+        self._tree.scrollToItem(item)
         self._updating_tree = False
         self._update_count_label()
         self._path_input.clear()
 
-    def _find_tree_item_by_path(self, path):
-        norm_path = os.path.normcase(os.path.normpath(path))
+    def _ensure_path_visible(self, target_path: str):
+        norm_target = os.path.normcase(os.path.normpath(target_path))
         root = self._tree.invisibleRootItem()
         for i in range(root.childCount()):
-            result = self._search_item(root.child(i), norm_path)
+            root_item = root.child(i)
+            root_path = os.path.normcase(os.path.normpath(
+                root_item.data(0, Qt.ItemDataRole.UserRole) or ''))
+            if norm_target == root_path:
+                return root_item
+            if norm_target.startswith(root_path + os.sep):
+                return self._expand_to_path(root_item, root_path, norm_target)
+        return None
+
+    def _expand_to_path(self, parent_item: QTreeWidgetItem, parent_path: str, target_path: str):
+        rel = target_path[len(parent_path):].lstrip(os.sep)
+        if not rel:
+            return parent_item
+        parts = rel.split(os.sep)
+        current_item = parent_item
+        current_path = parent_path
+        for part in parts:
+            if self._has_placeholder(current_item):
+                self._updating_tree = True
+                current_item.takeChild(0)
+                dir_path = current_item.data(0, Qt.ItemDataRole.UserRole)
+                parent_state = current_item.checkState(0)
+                self._load_children(current_item, dir_path)
+                if parent_state == Qt.CheckState.Checked:
+                    for j in range(current_item.childCount()):
+                        self._cascade_check(current_item.child(j), True)
+                self._loaded_items.add(id(current_item))
+                self._updating_tree = False
+                current_item.setExpanded(True)
+            found = None
+            norm_part = os.path.normcase(part)
+            for j in range(current_item.childCount()):
+                child = current_item.child(j)
+                if os.path.normcase(child.text(0)) == norm_part:
+                    found = child
+                    break
+            if found is None:
+                return None
+            current_item = found
+            current_path = os.path.join(current_path, part)
+        return current_item
+
+    def _find_tree_item_by_path(self, path: str):
+        norm = os.path.normcase(os.path.normpath(path))
+        root = self._tree.invisibleRootItem()
+        for i in range(root.childCount()):
+            result = self._search_item(root.child(i), norm)
             if result is not None:
                 return result
         return None
 
-    def _search_item(self, item, norm_path):
-        item_path = os.path.normcase(os.path.normpath(item.data(0, Qt.ItemDataRole.UserRole) or ''))
+    def _search_item(self, item: QTreeWidgetItem, norm_path: str):
+        item_path = os.path.normcase(os.path.normpath(
+            item.data(0, Qt.ItemDataRole.UserRole) or ''))
         if item_path == norm_path:
             return item
-        for i in range(item.childCount()):
-            result = self._search_item(item.child(i), norm_path)
-            if result is not None:
-                return result
+        if not self._has_placeholder(item):
+            for i in range(item.childCount()):
+                result = self._search_item(item.child(i), norm_path)
+                if result is not None:
+                    return result
         return None
 
     def _on_confirm(self):
@@ -1571,7 +1954,7 @@ class _ScopeSelectionDialog(QDialog):
             self._collect_checked(root.child(i))
         self.accept()
 
-    def _collect_checked(self, item):
+    def _collect_checked(self, item: QTreeWidgetItem):
         if item.checkState(0) == Qt.CheckState.Checked:
             path = item.data(0, Qt.ItemDataRole.UserRole)
             tag = item.data(0, Qt.ItemDataRole.UserRole + 1)
@@ -1601,6 +1984,7 @@ class MainWindow(QMainWindow):
         self._current_file_types = []
         self._exclude_known_types = False
         self._all_results = []
+        self._selected_dirs = set()
         self._fs_watcher = QFileSystemWatcher(self)
         self._fs_watcher.directoryChanged.connect(self._on_fs_directory_changed)
         self._fs_refresh_timer = QTimer(self)
@@ -1841,18 +2225,19 @@ class MainWindow(QMainWindow):
         menubar.addMenu(help_menu)
 
     def _on_reset_settings(self):
-        msg = _styled_msg_box(
+        reply = _styled_msg_box(
             self, QMessageBox.Icon.Warning,
             "恢复默认设置",
             "此操作将删除所有用户自定义设置，包括：\n\n"
             "  \u2022 所有已扫描目录的记录\n"
             "  \u2022 所有用户偏好设置\n"
             "  \u2022 搜索历史记录\n"
-            "  \u2022 文件索引数据库\n\n"
+            "  \u2022 文件索引数据库\n"
+            "  \u2022 自定义搜索范围\n\n"
             "此操作不可恢复！确定要继续吗？",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
-        if msg.exec() != QMessageBox.StandardButton.Yes:
+        if reply != QMessageBox.StandardButton.Yes:
             return
 
         if self._scan_worker and self._scan_worker.isRunning():
@@ -1872,18 +2257,27 @@ class MainWindow(QMainWindow):
         _styled_msg_box(
             self, QMessageBox.Icon.Information,
             "操作成功", "所有设置已恢复为默认值。\n应用将重置为首次启动状态。"
-        ).exec()
+        )
 
         self._all_results = []
         self._current_file_types = []
         self._exclude_known_types = False
+        self._selected_dirs = set()
         self._is_first_launch = True
 
         self.result_list.clear_results()
         self.preview_panel.clear()
         self.filter_bar._reload_scope()
         self.filter_bar._check_index()
-        self._search_scope_panel.set_scanned_dirs([])
+        self._search_scope_panel.reset()
+
+        self.search_bar.search_input.clear()
+        self.search_bar._set_mode('name')
+        self.search_bar.case_sensitive_checkbox.setChecked(False)
+
+        for key, btn in self.filter_bar.type_buttons.items():
+            btn.setChecked(key == 'all')
+        self.filter_bar._selected_category = 'all'
 
         self._switch_to_welcome()
 
@@ -1941,6 +2335,7 @@ class MainWindow(QMainWindow):
         scanned = get_scanned_dirs()
         if scanned:
             self._search_scope_panel.set_scanned_dirs(scanned)
+        self._search_scope_panel.update_scope_info(self.filter_bar.get_indexed_count())
 
     def _switch_to_scan_progress(self):
         self._stacked.setCurrentWidget(self._scan_progress_page)
@@ -1955,6 +2350,7 @@ class MainWindow(QMainWindow):
     def _deferred_index_check(self):
         self.filter_bar._check_index()
         count = self.filter_bar.get_indexed_count()
+        self._search_scope_panel.update_scope_info(count)
         if count == 0:
             self.status_left.setText("就绪 - 请点击[重新扫描]开始")
         else:
@@ -2012,6 +2408,17 @@ class MainWindow(QMainWindow):
         all_dirs = self.filter_bar.get_search_dirs()
         save_scanned_dirs(all_dirs)
         self._search_scope_panel.set_scanned_dirs(all_dirs)
+        self._search_scope_panel.update_scope_info(total_files)
+
+        from config import load_config, save_config
+        config = load_config()
+        existing_dirs = set(config.get("search", {}).get("default_dirs", []))
+        for d in all_dirs:
+            existing_dirs.add(d)
+        config.setdefault("search", {})["default_dirs"] = list(existing_dirs)
+        save_config(config)
+        self.filter_bar._search_dirs = list(existing_dirs)
+        self.filter_bar._update_scope_label()
 
         self.status_left.setText(f"扫描完成 - 共 {total_files:,} 个文件，耗时 {elapsed:.1f} 秒")
         self.status_right.setText("")
@@ -2030,15 +2437,19 @@ class MainWindow(QMainWindow):
         _styled_msg_box(
             self, QMessageBox.Icon.Critical,
             "扫描错误", f"扫描过程中发生错误：\n{err_msg}"
-        ).exec()
+        )
 
     def _on_scan_cancelled(self):
+        self._scan_progress_page._detail.setText("正在取消扫描...")
+        self._scan_progress_page._cancel_btn.setEnabled(False)
+        QApplication.processEvents()
+
         if self._scan_worker and self._scan_worker.isRunning():
             self._scan_worker.cancel()
-            self._scan_worker.wait(5000)
+            self._scan_worker.wait(3000)
             if self._scan_worker.isRunning():
                 self._scan_worker.terminate()
-                self._scan_worker.wait()
+                self._scan_worker.wait(2000)
         from database.db_manager import DatabaseManager
         DatabaseManager()._search_cache.invalidate()
         self.filter_bar.reset_scan_state()
@@ -2049,7 +2460,7 @@ class MainWindow(QMainWindow):
             self._switch_to_main()
 
     def _on_scan_unscanned(self, unscanned_dirs: list):
-        msg = _styled_msg_box(
+        reply = _styled_msg_box(
             self, QMessageBox.Icon.Question,
             "扫描未扫描目录",
             "以下目录尚未扫描：\n\n" +
@@ -2057,7 +2468,7 @@ class MainWindow(QMainWindow):
             "\n\n是否立即扫描这些目录？",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
-        if msg.exec() == QMessageBox.StandardButton.Yes:
+        if reply == QMessageBox.StandardButton.Yes:
             self._start_scan_with_dirs(unscanned_dirs)
 
     def _on_search(self, name_query, content_query):
@@ -2065,14 +2476,14 @@ class MainWindow(QMainWindow):
             return
 
         if self.filter_bar.get_indexed_count() == 0:
-            msg = _styled_msg_box(
+            reply = _styled_msg_box(
                 self, QMessageBox.Icon.Question,
                 "尚未扫描",
                 "尚未建立文件索引。是否立即扫描磁盘？\n\n"
                 "扫描后搜索速度将大幅提升，只需扫描一次即可。",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
             )
-            if msg.exec() == QMessageBox.StandardButton.Yes:
+            if reply == QMessageBox.StandardButton.Yes:
                 self._on_scan_requested()
             return
 
@@ -2082,13 +2493,15 @@ class MainWindow(QMainWindow):
             self._search_worker.wait()
 
         case_sensitive = self.search_bar.is_case_sensitive()
+        all_dirs = self._search_scope_panel.get_all_scanned_dirs()
         selected_dirs = self._search_scope_panel.get_selected_dirs()
+        self._selected_dirs = set(selected_dirs)
 
         query = SearchQuery(
             name_query=name_query if name_query else None,
             content_query=content_query if content_query else None,
             content_mode='keyword',
-            include_dirs=selected_dirs if selected_dirs else self.filter_bar.get_search_dirs(),
+            include_dirs=all_dirs if all_dirs else self.filter_bar.get_search_dirs(),
             exclude_dirs=get_exclude_dirs(),
             max_results=get_max_results(),
             name_case_sensitive=case_sensitive,
@@ -2115,6 +2528,10 @@ class MainWindow(QMainWindow):
         self.result_list.hide_search_progress()
 
         filtered = self._all_results
+
+        if self._selected_dirs:
+            filtered = [r for r in filtered
+                       if self._is_path_in_selected_dirs(r.file_item.path)]
 
         if self._exclude_known_types:
             from models.file_item import FILE_TYPE_MAP
@@ -2179,8 +2596,19 @@ class MainWindow(QMainWindow):
             self._apply_current_filter()
 
     def _on_scope_changed(self, dirs):
+        self._selected_dirs = set(dirs)
         if self._all_results:
-            self._refresh_current_search()
+            self._apply_current_filter()
+
+    def _is_path_in_selected_dirs(self, file_path: str) -> bool:
+        if not self._selected_dirs:
+            return True
+        normalized = os.path.normcase(os.path.normpath(file_path))
+        for d in self._selected_dirs:
+            norm_d = os.path.normcase(os.path.normpath(d))
+            if normalized.startswith(norm_d + os.sep) or normalized == norm_d:
+                return True
+        return False
 
     def _update_fs_watcher(self):
         self._fs_watcher.removePaths(self._fs_watcher.directories())
