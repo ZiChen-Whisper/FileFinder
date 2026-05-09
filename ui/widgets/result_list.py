@@ -2,8 +2,8 @@ import os
 from PySide6.QtWidgets import (QListWidget, QListWidgetItem, QWidget, QVBoxLayout,
                              QLabel, QHBoxLayout, QFrame, QMenu, QApplication,
                              QAbstractItemView, QProgressBar, QStackedWidget)
-from PySide6.QtGui import QFont, QIcon, QFontMetrics, QDrag, QPixmap, QPainter, QColor, QRegion, QPainterPath
-from PySide6.QtCore import Qt, Signal, QSize, QMimeData, QUrl, QPoint, QRectF
+from PySide6.QtGui import QFont, QIcon, QFontMetrics, QDrag, QPixmap, QPainter, QColor, QRegion, QPainterPath, QPen
+from PySide6.QtCore import Qt, Signal, QSize, QMimeData, QUrl, QPoint, QRectF, QPropertyAnimation, QEasingCurve
 from models import SearchResult
 
 
@@ -17,30 +17,60 @@ class RoundedMenu(QMenu):
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self._border_radius = 10
+        self._anim = QPropertyAnimation(self, b"windowOpacity")
+        self._anim.setDuration(120)
+        self._anim.setStartValue(0.0)
+        self._anim.setEndValue(1.0)
+        self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
 
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
+        shadow_rect = QRectF(self.rect()).adjusted(4, 4, -1, -1)
+        shadow_path = QPainterPath()
+        shadow_path.addRoundedRect(shadow_rect, self._border_radius + 2, self._border_radius + 2)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(0, 0, 0, 18))
+        painter.drawPath(shadow_path)
+
+        inner_shadow = QRectF(self.rect()).adjusted(3, 3, -2, -2)
+        inner_path = QPainterPath()
+        inner_path.addRoundedRect(inner_shadow, self._border_radius + 1, self._border_radius + 1)
+        painter.setBrush(QColor(0, 0, 0, 10))
+        painter.drawPath(inner_path)
+
         path = QPainterPath()
-        rect = QRectF(self.rect()).adjusted(1, 1, -1, -1)
+        rect = QRectF(self.rect()).adjusted(2, 2, -2, -2)
         path.addRoundedRect(rect, self._border_radius, self._border_radius)
         painter.setClipPath(path)
 
         painter.setBrush(QColor("#FFFFFF"))
-        painter.setPen(QColor("#E5E7EB"))
+        painter.setPen(Qt.PenStyle.NoPen)
         painter.drawRoundedRect(rect, self._border_radius, self._border_radius)
 
         painter.setClipping(False)
+
+        border_path = QPainterPath()
+        border_rect = QRectF(self.rect()).adjusted(1.5, 1.5, -1.5, -1.5)
+        border_path.addRoundedRect(border_rect, self._border_radius, self._border_radius)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        pen = QPen(QColor("#E5E7EB"), 1)
+        pen.setCosmetic(True)
+        painter.setPen(pen)
+        painter.drawPath(border_path)
+        painter.end()
+
         super().paintEvent(event)
 
     def showEvent(self, event):
         super().showEvent(event)
         path = QPainterPath()
-        path.addRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1),
+        path.addRoundedRect(QRectF(self.rect()).adjusted(2, 2, -2, -2),
                           self._border_radius, self._border_radius)
         region = QRegion(path.toFillPolygon().toPolygon())
         self.setMask(region)
+        self._anim.start()
 
 FILE_ICON_MAP = {
     '.py': 'doctype/code.svg', '.js': 'doctype/code.svg', '.ts': 'doctype/code.svg',
@@ -149,28 +179,29 @@ CENTER_PROGRESS_STYLE = """
 
 UNIFIED_MENU_STYLE = """
     QMenu {
-        background-color: transparent;
+        background-color: #FFFFFF;
         border: none;
-        padding: 0px;
+        padding: 6px 4px;
     }
     QMenu::item {
-        padding: 8px 32px 8px 36px;
-        border-radius: 8px;
+        padding: 8px 28px 8px 20px;
+        border-radius: 6px;
         font-size: 13px;
         color: #1F2937;
         background: transparent;
+        margin: 1px 4px;
     }
     QMenu::item:selected {
         background-color: #F5F3FF;
         color: #7C3AED;
     }
     QMenu::icon {
-        padding-left: 10px;
+        padding-left: 8px;
     }
     QMenu::separator {
         height: 1px;
-        background: #E5E7EB;
-        margin: 3px 8px;
+        background: #F3F4F6;
+        margin: 4px 12px;
     }
     QMenu::right-arrow {
         width: 12px;
@@ -246,13 +277,14 @@ class ResultItemWidget(QFrame):
             name_row.addWidget(match_label)
         name_row.addStretch()
 
-        path_label = QLabel(self._result.file_item.path)
+        dir_path = os.path.dirname(self._result.file_item.path)
+        path_label = QLabel(dir_path)
         path_font = QFont()
         path_font.setPointSize(11)
         path_label.setFont(path_font)
         path_label.setStyleSheet("color: #6B7280; background: transparent; border: none;")
         fm = QFontMetrics(path_font)
-        elided = fm.elidedText(self._result.file_item.path, Qt.TextElideMode.ElideLeft, 500)
+        elided = fm.elidedText(dir_path, Qt.TextElideMode.ElideLeft, 500)
         path_label.setText(elided)
 
         info_row = QHBoxLayout()
@@ -379,7 +411,10 @@ class ResultListWidget(QListWidget):
         self._progress_overlay = None
         self._progress_bar = None
         self._progress_label = None
+        self._empty_widget = None
+        self._empty_text_label = None
         self._setup_progress_overlay()
+        self._setup_empty_state()
 
     def _setup_progress_overlay(self):
         self._progress_overlay = QFrame(self)
@@ -415,10 +450,71 @@ class ResultListWidget(QListWidget):
 
         self._progress_overlay.setVisible(False)
 
+    def _setup_empty_state(self):
+        self._empty_widget = QFrame(self)
+        self._empty_widget.setStyleSheet("""
+            QFrame {
+                background: transparent;
+                border: none;
+            }
+        """)
+        layout = QVBoxLayout(self._empty_widget)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.setSpacing(12)
+
+        empty_icon = QLabel()
+        empty_icon.setPixmap(QIcon("icons/search-alt.svg").pixmap(QSize(48, 48)))
+        empty_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty_icon.setStyleSheet("background: transparent; border: none;")
+
+        self._empty_text_label = QLabel("未找到匹配文件")
+        self._empty_text_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._empty_text_label.setStyleSheet("""
+            font-size: 16px;
+            color: #9CA3AF;
+            background: transparent;
+            border: none;
+        """)
+
+        hint_label = QLabel("尝试修改搜索条件或扩大搜索范围")
+        hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        hint_label.setStyleSheet("""
+            font-size: 13px;
+            color: #D1D5DB;
+            background: transparent;
+            border: none;
+        """)
+
+        layout.addStretch()
+        layout.addWidget(empty_icon, 0, Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self._empty_text_label, 0, Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(hint_label, 0, Qt.AlignmentFlag.AlignCenter)
+        layout.addStretch()
+        self._empty_widget.setVisible(False)
+
+    def _position_empty_widget(self):
+        if not self._empty_widget:
+            return
+        self._empty_widget.setGeometry(0, 0, self.width(), self.height())
+
+    def show_empty_state(self, text: str = "未找到匹配文件"):
+        if self._empty_text_label:
+            self._empty_text_label.setText(text)
+        if self._empty_widget:
+            self._empty_widget.setVisible(True)
+            self._empty_widget.raise_()
+            self._position_empty_widget()
+
+    def hide_empty_state(self):
+        if self._empty_widget:
+            self._empty_widget.setVisible(False)
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
         if self._progress_overlay and self._progress_overlay.isVisible():
             self._position_progress_overlay()
+        if self._empty_widget and self._empty_widget.isVisible():
+            self._position_empty_widget()
 
     def _position_progress_overlay(self):
         if not self._progress_overlay:
@@ -430,6 +526,7 @@ class ResultListWidget(QListWidget):
         self._progress_overlay.setGeometry(x, y, overlay_w, overlay_h)
 
     def show_search_progress(self, text: str = "正在搜索..."):
+        self.hide_empty_state()
         if self._progress_label:
             self._progress_label.setText(text)
         if self._progress_overlay:

@@ -286,5 +286,61 @@ class DatabaseManager:
             conn.close()
         self._search_cache.invalidate()
 
-    def close(self):
+    def update_file_entry(self, old_path: str, new_path: str = None, new_name: str = None,
+                          new_ext: str = None, new_size: int = None, new_mtime: float = None):
+        conn = self._get_conn()
+        try:
+            cursor = conn.cursor()
+            if new_path is not None:
+                name_stem = os.path.splitext(new_name)[0] if new_name and not new_path.endswith(os.sep) else new_name
+                cursor.execute(
+                    "UPDATE file_index_cache SET path = ?, name = ?, name_stem = ?, extension = ?, size = ?, modified_time = ? WHERE path = ?",
+                    (new_path, new_name, name_stem, new_ext, new_size, new_mtime, old_path)
+                )
+            elif new_name is not None:
+                name_stem = os.path.splitext(new_name)[0]
+                cursor.execute(
+                    "UPDATE file_index_cache SET name = ?, name_stem = ? WHERE path = ?",
+                    (new_name, name_stem, old_path)
+                )
+            conn.commit()
+        finally:
+            conn.close()
         self._search_cache.invalidate()
+
+    def delete_file_entry(self, path: str):
+        conn = self._get_conn()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM file_index_cache WHERE path = ?", (path,))
+            conn.commit()
+        finally:
+            conn.close()
+        self._search_cache.invalidate()
+
+    def add_file_entry(self, path: str, name: str, ext: str, size: int, mtime: float, is_dir: int = 0, item_count: int = 0):
+        conn = self._get_conn()
+        try:
+            cursor = conn.cursor()
+            name_stem = name if is_dir else os.path.splitext(name)[0]
+            cursor.execute(
+                "INSERT OR REPLACE INTO file_index_cache (path, name, name_stem, extension, size, modified_time, is_directory, item_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (path, name, name_stem, ext, size, mtime, is_dir, item_count)
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        self._search_cache.invalidate()
+
+    def get_file_entry(self, path: str):
+        conn = self._get_conn()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM file_index_cache WHERE path = ?", (path,))
+            return cursor.fetchone()
+        finally:
+            conn.close()
+
+    def close(self):
+        if hasattr(self, '_search_cache'):
+            self._search_cache.invalidate()

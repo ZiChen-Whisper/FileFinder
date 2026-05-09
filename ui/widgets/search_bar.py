@@ -302,5 +302,15 @@ class SearchBar(QWidget):
     def is_case_sensitive(self):
         return self.case_sensitive_checkbox.isChecked()
 
+    def get_name_query(self) -> str:
+        if self._search_mode == 'name':
+            return self.search_input.text()
+        return ""
+
+    def get_content_query(self) -> str:
+        if self._search_mode == 'content':
+            return self.search_input.text()
+        return ""
+
     def set_focus(self):
         self.search_input.setFocus()

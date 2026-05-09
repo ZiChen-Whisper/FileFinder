@@ -63,6 +63,16 @@ def _row_to_file_item(row) -> FileItem:
         item_count=row["item_count"] if "item_count" in row.keys() else 0
     )
 
+def _is_path_in_dirs(file_path: str, include_dirs: list) -> bool:
+    if not include_dirs:
+        return True
+    normalized = os.path.normcase(os.path.normpath(file_path))
+    for d in include_dirs:
+        norm_d = os.path.normcase(os.path.normpath(d))
+        if normalized.startswith(norm_d + os.sep) or normalized == norm_d:
+            return True
+    return False
+
 def search_by_name(query: SearchQuery) -> List[Tuple[int, FileItem]]:
     db = DatabaseManager()
     pattern = query.name_query if query.has_name_query else ""
@@ -80,6 +90,9 @@ def search_by_name(query: SearchQuery) -> List[Tuple[int, FileItem]]:
     results = []
     for row in db_results:
         item = _row_to_file_item(row)
+
+        if query.include_dirs and not _is_path_in_dirs(item.path, query.include_dirs):
+            continue
 
         if query.has_name_query:
             pat = query.name_query

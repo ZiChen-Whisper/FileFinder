@@ -12,6 +12,7 @@ DEFAULT_CONFIG = {
     },
     "search": {
         "default_dirs": [],
+        "scanned_dirs": [],
         "exclude_dirs": [
             "C:\\Windows",
             "C:\\Program Files",
@@ -86,3 +87,31 @@ def get_max_results() -> int:
 def get_content_max_size_mb() -> int:
     config = load_config()
     return config.get("search", {}).get("content_max_size_mb", 10)
+
+def get_scanned_dirs() -> List[str]:
+    config = load_config()
+    return config.get("search", {}).get("scanned_dirs", [])
+
+def save_scanned_dirs(dirs: List[str]) -> None:
+    config = load_config()
+    config["search"]["scanned_dirs"] = list(dirs)
+    save_config(config)
+
+def is_first_launch() -> bool:
+    config = load_config()
+    scanned = config.get("search", {}).get("scanned_dirs", [])
+    default_dirs = config.get("search", {}).get("default_dirs", [])
+    return not scanned and not default_dirs
+
+def reset_all_settings() -> None:
+    config_path = get_config_path()
+    if os.path.exists(config_path):
+        os.remove(config_path)
+    db_path = os.path.join(get_config_dir(), "filefinder.db")
+    if os.path.exists(db_path):
+        os.remove(db_path)
+    from database.db_manager import DatabaseManager
+    if DatabaseManager._instance is not None:
+        DatabaseManager._instance._search_cache.invalidate()
+        DatabaseManager._instance = None
+        DatabaseManager._db_path = None
