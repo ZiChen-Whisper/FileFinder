@@ -1,6 +1,7 @@
 # FileFinder AI 开发指令
 
 > 本文档是 FileFinder 项目开发的行为准则和操作指南，供 AI 助手在开发过程中遵循。
+> 版本：v1.1 | 更新日期：2026-05-10
 
 ---
 
@@ -12,22 +13,26 @@ FileFinder 是一款轻量级的本地文件搜索桌面工具，帮助用户通
 
 ### 1.2 核心特性
 
-| 特性 | 说明 |
-|------|------|
-| **文件名搜索** | 模糊匹配、通配符、精确匹配 |
-| **文件内容搜索** | 支持纯文本、代码、PDF、Word、Excel 等格式 |
-| **联合搜索** | 文件名 + 内容条件组合搜索 |
-| **实时预览** | 搜索结果高亮显示匹配内容 |
-| **系统托盘** | 全局快捷键唤起，后台常驻 |
+| 特性 | 说明 | 状态 |
+|------|------|------|
+| **文件名搜索** | 模糊匹配、通配符、精确匹配 + SQLite 索引 + 内存缓存 | ✅ 已实现 |
+| **文件内容搜索** | 纯文本/代码文件搜索，多线程并发 | ✅ 已实现 |
+| **联合搜索** | 文件名 + 内容 AND 组合搜索 | ✅ 已实现 |
+| **磁盘扫描索引** | SQLite 持久化索引，一次扫描终生复用 | ✅ 已实现 |
+| **文件系统监控** | QFileSystemWatcher 自动同步索引 | ✅ 已实现 |
+| **文档格式解析** | PDF/Word/Excel 解析 | 🔄 P1 |
+| **内容预览高亮** | 搜索结果高亮显示匹配内容 | 🔄 P1 |
+| **系统托盘** | 全局快捷键唤起，后台常驻 | 🔄 P2 |
 
 ### 1.3 技术栈
 
 | 层级 | 技术 | 说明 |
 |------|------|------|
-| GUI 框架 | PyQt6 | 桌面应用界面 |
+| GUI 框架 | **PySide6** | 桌面应用界面（注意：非 PyQt6） |
 | 编程语言 | Python 3.10+ | 后端业务逻辑 |
-| 数据库 | SQLite 3 | 本地数据存储 |
-| 文档解析 | PyMuPDF / python-docx / openpyxl | 多格式文档解析 |
+| 数据库 | SQLite 3 | 本地数据存储 + 内存缓存 |
+| 文档解析 | PyMuPDF / python-docx / openpyxl | 多格式文档解析（P1） |
+| 编码检测 | charset-normalizer | 自动检测文件编码 |
 | 打包工具 | PyInstaller | 打包为 exe |
 
 ### 1.4 相关文档
@@ -38,6 +43,7 @@ FileFinder 是一款轻量级的本地文件搜索桌面工具，帮助用户通
 | PRD.md | 产品需求规格说明书 |
 | TECH_DESIGN.md | 技术架构和实现方案 |
 | **AGENTS.md** | **开发行为准则（本文档）** |
+| plan.md | 开发步骤和里程碑 |
 
 ---
 
@@ -49,28 +55,47 @@ FileFinder 是一款轻量级的本地文件搜索桌面工具，帮助用户通
 filefinder/
 ├── main.py                    # 程序入口，只做初始化
 ├── config.py                  # 配置管理，集中管理常量
+├── constants.py               # 常量定义（扩展名分类、窗口尺寸等）
 ├── requirements.txt           # 依赖清单
 │
 ├── models/                    # 数据模型层
-│   └── *.py                   # 使用 dataclass 定义数据结构
+│   ├── file_item.py           # FileItem 数据类
+│   ├── search_query.py        # SearchQuery 数据类
+│   ├── search_result.py       # SearchResult / ContentMatch 数据类
+│   └── search_history.py      # SearchHistory 数据类
 │
 ├── core/                      # 核心业务逻辑层
-│   ├── name_searcher.py      # 文件名搜索
-│   ├── content_searcher.py   # 内容搜索
-│   ├── file_parser.py        # 文件解析
-│   └── search_engine.py      # 搜索调度
+│   ├── name_searcher.py       # 文件名搜索（模糊/精确/通配符 + 评分）
+│   ├── content_searcher.py    # 内容搜索（多线程 + 信号通知）
+│   ├── file_parser.py         # 文件解析（注册表模式）
+│   └── search_engine.py       # 搜索调度引擎
 │
 ├── ui/                        # 用户界面层
-│   ├── main_window.py        # 主窗口
-│   ├── widgets/              # UI 组件
-│   └── dialogs/              # 对话框
+│   ├── main_window.py         # 主窗口
+│   ├── widgets/               # UI 组件
+│   │   ├── search_bar.py      # 搜索栏
+│   │   ├── result_list.py     # 结果列表
+│   │   ├── filter_bar.py      # 筛选栏
+│   │   └── preview_panel.py   # 预览面板
+│   └── dialogs/               # 对话框
+│       └── settings_dialog.py # 设置对话框
 │
 ├── utils/                     # 工具函数
-│   ├── encoding.py           # 编码检测
-│   └── thread_helper.py      # 线程工具
+│   ├── encoding.py            # 编码检测
+│   ├── path_helper.py         # 路径工具
+│   └── thread_helper.py       # 防抖器
 │
-└── database/                  # 数据访问层
-    └── *_dao.py               # 数据访问对象
+├── database/                  # 数据访问层
+│   ├── db_manager.py          # 数据库管理器（单例 + 内存缓存）
+│   ├── history_dao.py         # 搜索历史 DAO
+│   └── settings_dao.py        # 设置 DAO
+│
+├── data/                      # 运行时数据
+│   └── filefinder.db          # SQLite 数据库
+│
+└── icons/                     # 图标资源
+    ├── doctype/               # 文件类型图标（SVG）
+    └── *.svg                  # UI 图标
 ```
 
 ### 2.2 模块职责规范
@@ -85,36 +110,69 @@ filefinder/
 
 ### 2.3 开发优先级规范
 
-**必须严格按以下顺序开发：**
+**当前进度：P0 MVP 已完成，P1 开发中**
 
 ```
-P0 MVP（核心功能） → P1 增强功能 → P2 完善功能
+P0 MVP（核心功能）✅ 已完成 → P1 增强功能 🔄 开发中 → P2 完善功能
 ```
 
-#### P0 MVP 阶段
+#### P0 MVP 阶段 ✅ 已完成
 
-- [ ] 文件名模糊搜索
-- [ ] 纯文本内容搜索（.txt, .md, .log, .json, .xml 等）
-- [ ] 搜索结果列表展示
-- [ ] 双击打开文件
-- [ ] 基础设置（搜索目录、排除目录）
+- [x] 文件名模糊搜索
+- [x] 纯文本内容搜索（.txt, .md, .log, .json, .xml 等）
+- [x] 搜索结果列表展示
+- [x] 双击打开文件
+- [x] 基础设置（搜索目录、排除目录）
+- [x] 联合搜索（文件名 + 内容 AND 组合）
+- [x] 磁盘扫描索引（SQLite 持久化）
+- [x] 文件系统监控（自动同步索引）
+- [x] 文件类型筛选（9 大分类）
+- [x] 搜索范围选择
+- [x] 右键菜单（打开/打开目录/复制路径）
+- [x] 拖拽文件
+- [x] 搜索取消
+- [x] 区分大小写
 
-**P0 阶段禁止添加的功能：**
-- PDF/Word/Excel 解析（P1）
-- 正则表达式搜索（P1）
-- 内容预览高亮（P1）
-- 搜索历史（P1）
+#### P1 增强阶段 🔄 开发中
+
+- [ ] PDF/Word/Excel 解析（PyMuPDF / python-docx / openpyxl）
+- [ ] 内容预览 + 高亮显示
+- [ ] 搜索历史（DAO 修复 + UI 集成）
+- [ ] 正则表达式搜索
+- [ ] 高级过滤（文件大小/修改日期范围）
+- [ ] 结果排序优化（相关度/时间/大小/名称）
+
+**P1 阶段禁止添加的功能：**
 - 系统托盘（P2）
+- 全局快捷键（P2）
+- 主题切换（P2）
+- 倒排索引（P2）
+
+#### P2 完善阶段
+
+- [ ] 系统托盘 + 全局快捷键
+- [ ] 主题切换（浅色/深色）
+- [ ] 窗口位置记忆
+- [ ] 全文索引（倒排索引，借鉴 AnyTXT）
+- [ ] mmap 流式搜索（借鉴 AnyTXT）
+- [ ] 搜索性能优化
 
 ### 2.4 配置管理规范
 
-**所有可配置项必须写入 `config.py`，禁止硬编码：**
+**所有可配置项必须写入 `config.py` 或 `constants.py`，禁止硬编码：**
 
 ```python
 # ✅ 正确：在 config.py 中定义
 DEFAULT_EXCLUDE_DIRS = ['node_modules', '__pycache__', '.git', '.venv']
 MAX_SEARCH_RESULTS = 1000
 CONTENT_MAX_FILE_SIZE_MB = 10
+
+# ✅ 正确：在 constants.py 中定义
+TEXT_EXTENSIONS = {'.txt', '.md', '.log', ...}
+CODE_EXTENSIONS = {'.py', '.js', '.ts', ...}
+SEARCH_DEBOUNCE_MS = 300
+MAX_WORKERS = 4
+BATCH_SIZE = 100
 
 # ❌ 错误：在业务代码中硬编码
 if directory not in ['node_modules', '__pycache__']:  # 硬编码
@@ -134,6 +192,7 @@ if directory not in ['node_modules', '__pycache__']:  # 硬编码
 | 常量 | UPPER_SNAKE_CASE | `MAX_RESULTS`, `DEFAULT_DIRS` |
 | 私有属性 | `_前缀 + snake_case` | `_search_engine`, `_config` |
 | 文件名 | snake_case.py | `file_parser.py`, `name_searcher.py` |
+| Qt Signal | snake_case | `result_found`, `search_completed` |
 
 ### 3.2 函数设计规范
 
@@ -231,10 +290,21 @@ logger = logging.getLogger(__name__)
 
 # 日志级别使用规范
 logger.debug("调试信息：正在遍历目录")
-logger.info("搜索完成，找到 {count} 个结果")
-logger.warning("文件过大，跳过: {path}")
-logger.error("解析失败: {path}", exc_info=True)  # 记录堆栈
+logger.info("搜索完成，找到 %d 个结果", count)
+logger.warning("文件过大，跳过: %s", path)
+logger.error("解析失败: %s", path, exc_info=True)  # 记录堆栈
 ```
+
+### 3.6 PySide6 特有规范
+
+**注意：本项目使用 PySide6，而非 PyQt6，API 差异需注意：**
+
+| 差异点 | PyQt6 | PySide6 |
+|--------|-------|---------|
+| 信号定义 | `pyqtSignal` | `Signal` |
+| 槽装饰器 | `@pyqtSlot` | `@Slot` |
+| 导入路径 | `from PyQt6.QtCore import ...` | `from PySide6.QtCore import ...` |
+| 枚举访问 | `Qt.AlignmentFlag.AlignLeft` | `Qt.AlignmentFlag.AlignLeft` |
 
 ---
 
@@ -290,37 +360,16 @@ logger.error("解析失败: {path}", exc_info=True)  # 记录堆栈
 
 **必须测试以下边界情况：**
 
-```python
-# 1. 空目录搜索
-search_in_empty_directory()
-
-# 2. 权限不足的目录
-search_in_restricted_directory()
-
-# 3. 文件名含特殊字符
-search_file_with_special_chars("test[1].txt")
-
-# 4. 超长路径 (>260 字符，Windows 限制)
-search_file_with_long_path()
-
-# 5. 符号链接/快捷方式
-search_symlink_target()
-
-# 6. 网络路径 (UNC 路径)
-search_network_path(r"\\server\share")
-
-# 7. 大文件 (接近内存限制)
-search_in_large_file(50 * 1024 * 1024)  # 50MB
-
-# 8. 正在被其他程序写入的文件
-search_file_being_written()
-
-# 9. 搜索过程中目录结构变化
-search_during_directory_change()
-
-# 10. 搜索被中断（强制关闭文件句柄）
-search_with_interrupted_read()
-```
+1. 空目录搜索
+2. 权限不足的目录
+3. 文件名含特殊字符（如 `test[1].txt`）
+4. 超长路径（>260 字符，Windows 限制）
+5. 符号链接/快捷方式
+6. 网络路径（UNC 路径 `\\server\share`）
+7. 大文件（接近内存限制，50MB+）
+8. 正在被其他程序写入的文件
+9. 搜索过程中目录结构变化
+10. 搜索被中断（强制关闭文件句柄）
 
 ### 4.4 测试数据准备
 
@@ -338,8 +387,8 @@ test_data/
 │   ├── utils.py
 │   └── test.js
 ├── documents/
-│   ├── sample.pdf      (需要准备)
-│   └── sample.docx     (需要准备)
+│   ├── sample.pdf      (P1 阶段准备)
+│   └── sample.docx     (P1 阶段准备)
 ├── special/
 │   ├── file[1].txt     # 含特殊字符
 │   └── 文件名中文.txt   # 中文文件名
@@ -368,10 +417,11 @@ test_data/
 | 指标 | 限制 | 超出处理 |
 |------|------|---------|
 | 单文件大小 | 10MB | 跳过内容搜索 |
-| 结果数量 | 1000 条 | 分页加载 |
+| 结果数量 | 1000 条 | 截断返回 |
 | 搜索防抖 | 300ms | 延迟执行 |
 | 线程数 | 4 个 | 限制并发 |
 | 内存占用 | 200MB | 释放缓存 |
+| 批量写入 | 500 条/批 | 数据库批量 commit |
 
 **禁止在主线程执行耗时操作：**
 
@@ -387,6 +437,16 @@ def search_async():
     with ThreadPoolExecutor() as executor:
         executor.submit(self._do_search)
 ```
+
+**内容搜索性能优化方向（借鉴 AnyTXT Searcher）：**
+
+| 优化方向 | 说明 | 阶段 |
+|---------|------|------|
+| mmap 流式搜索 | 使用 `mmap.mmap()` 替代 `open().read()`，大文件边读边搜 | P2 |
+| 倒排索引 | 构建词项→文件映射，搜索复杂度从 O(N) 降为 O(1) | P2 |
+| 增量索引 | 文件变化时只更新差异部分，避免全量重建 | 已部分实现 |
+| 分块读取 | 大文件分块读取，避免一次性加载到内存 | P2 |
+| 结果分批渲染 | 搜索结果分批加载到 UI，避免一次性渲染大量数据 | P1 |
 
 ### 5.3 安全注意事项
 
@@ -411,13 +471,13 @@ def safe_resolve(path: str) -> Path:
 
 ### 5.4 用户体验注意事项
 
-| 注意事项 | 说明 |
-|---------|------|
-| **即时反馈** | 搜索开始时显示加载状态 |
-| **可中断** | 用户可随时取消正在进行的搜索 |
-| **错误友好** | 出错时显示友好提示，不显示技术堆栈 |
-| **状态可见** | 状态栏显示索引状态、搜索耗时 |
-| **窗口记忆** | 记住窗口大小和位置，下次启动恢复 |
+| 注意事项 | 说明 | 状态 |
+|---------|------|------|
+| **即时反馈** | 搜索开始时显示加载状态 | ✅ |
+| **可中断** | 用户可随时取消正在进行的搜索 | ✅ |
+| **错误友好** | 出错时显示友好提示，不显示技术堆栈 | ✅ |
+| **状态可见** | 状态栏显示索引状态、搜索耗时 | ✅ |
+| **窗口记忆** | 记住窗口大小和位置，下次启动恢复 | 🔄 P2 |
 
 ### 5.5 兼容性注意事项
 
@@ -426,7 +486,7 @@ def safe_resolve(path: str) -> Path:
 | **Windows 10** | 路径分隔符用 `\` 或 `pathlib` 自动处理 |
 | **Windows 11** | 注意长路径支持（需管理员权限启用） |
 | **高 DPI** | 使用 Qt 的高 DPI 支持，不硬编码像素值 |
-| **深色模式** | 支持系统主题切换，UI 样式自适应 |
+| **深色模式** | 支持系统主题切换，UI 样式自适应（P2） |
 
 ### 5.6 常见错误避免
 
@@ -438,6 +498,21 @@ def safe_resolve(path: str) -> Path:
 | 路径错误 | 硬编码分隔符 | 用 `pathlib` 或 `os.path.join` |
 | 资源泄漏 | 打开文件未关闭 | 使用 `with` 语句 |
 | 竞态条件 | 搜索过程中目录变化 | 使用文件锁或快照 |
+| GUI 框架混淆 | 使用 PyQt6 的 API | 本项目使用 **PySide6**，注意 Signal/Slot 差异 |
+
+### 5.7 已知 Bug 与技术债务
+
+**开发时必须注意的已知问题：**
+
+| 问题 | 位置 | 说明 |
+|------|------|------|
+| `history_dao.py` 调用不存在的方法 | `database/history_dao.py` | 调用 `DatabaseManager().get_connection()` 但该方法不存在 |
+| `settings_dao.py` 同上 | `database/settings_dao.py` | 同上 |
+| `is_binary_file()` 逻辑反转 | `utils/path_helper.py` | 非文本字符判断条件反了 |
+| `main_window.py` 过于臃肿 | `ui/main_window.py`（2718 行） | 包含多个应独立的组件，需重构 |
+| `_styled_msg_box` 重复实现 | 多个文件 | 应提取为公共组件 |
+| `FILE_ICON_MAP` 重复定义 | result_list.py + preview_panel.py | 应提取为公共常量 |
+| Debouncer 未集成 | `utils/thread_helper.py` | 防抖器已实现但 SearchBar 未使用 |
 
 ---
 
@@ -455,6 +530,7 @@ def safe_resolve(path: str) -> Path:
 - [ ] 手动测试核心用例通过
 - [ ] 日志级别使用正确
 - [ ] 无网络请求代码
+- [ ] 使用 PySide6 而非 PyQt6 的 API
 
 ### B. 调试技巧
 
@@ -465,12 +541,14 @@ def safe_resolve(path: str) -> Path:
 | UI 卡顿 | 使用 `QThread` 或 `ThreadPoolExecutor` 移出主线程 |
 | 编码乱码 | 使用 `encoding.py` 中的 `detect_file_encoding()` 检测 |
 | 内存占用高 | 检查是否有大文件被一次性加载，添加大小限制 |
+| 数据库操作失败 | 检查 `DatabaseManager` 单例是否正确初始化 |
 
 ### C. 参考资源
 
 | 资源 | 链接 |
 |------|------|
-| PyQt6 文档 | https://doc.qt.io/qtforpython-6/ |
+| PySide6 文档 | https://doc.qt.io/qtforpython-6/ |
 | Python 编码指南 | PEP 8 - https://pep8.org/ |
 | PyInstaller 文档 | https://pyinstaller.org/en/stable/ |
 | charset-normalizer | https://charset-normalizer.readthedocs.io/ |
+| AnyTXT Searcher | https://anytxt.net/ （全文索引设计参考） |

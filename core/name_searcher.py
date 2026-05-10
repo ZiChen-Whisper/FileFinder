@@ -1,9 +1,13 @@
 import os
+import re
 import fnmatch
+import logging
 from datetime import datetime
 from typing import List, Tuple
 from models import FileItem, SearchQuery
 from database.db_manager import DatabaseManager
+
+logger = logging.getLogger(__name__)
 
 def fuzzy_match(name: str, pattern: str, case_sensitive: bool = False) -> bool:
     if not case_sensitive:
@@ -14,10 +18,17 @@ def fuzzy_match(name: str, pattern: str, case_sensitive: bool = False) -> bool:
     return pattern in name
 
 def wildcard_match(name: str, pattern: str, case_sensitive: bool = False) -> bool:
-    if not case_sensitive:
-        name = name.lower()
-        pattern = pattern.lower()
-    return fnmatch.fnmatch(name, pattern)
+    if case_sensitive:
+        return fnmatch.fnmatchcase(name, pattern)
+    return fnmatch.fnmatch(name.lower(), pattern.lower())
+
+def regex_match(name: str, pattern: str, case_sensitive: bool = False) -> bool:
+    try:
+        flags = 0 if case_sensitive else re.IGNORECASE
+        return bool(re.search(pattern, name, flags))
+    except re.error as e:
+        logger.warning("正则表达式语法错误: %s, 错误: %s", pattern, e)
+        return False
 
 def _calculate_name_relevance(name: str, pattern: str, case_sensitive: bool = False) -> int:
     if not pattern:
@@ -105,6 +116,8 @@ def search_by_name(query: SearchQuery) -> List[Tuple[int, FileItem]]:
                 match = (match_name == pat) if query.name_case_sensitive else (match_name.lower() == pat.lower())
             elif query.name_mode == 'wildcard':
                 match = wildcard_match(match_name, pat, query.name_case_sensitive)
+            elif query.name_mode == 'regex':
+                match = regex_match(match_name, pat, query.name_case_sensitive)
             else:
                 match = True
 

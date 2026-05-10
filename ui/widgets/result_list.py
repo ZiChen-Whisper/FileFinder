@@ -1,10 +1,46 @@
 import os
 from PySide6.QtWidgets import (QListWidget, QListWidgetItem, QWidget, QVBoxLayout,
                              QLabel, QHBoxLayout, QFrame, QMenu, QApplication,
-                             QAbstractItemView, QProgressBar, QStackedWidget)
+                             QAbstractItemView, QProgressBar, QStackedWidget, QSizePolicy)
 from PySide6.QtGui import QFont, QIcon, QFontMetrics, QDrag, QPixmap, QPainter, QColor, QRegion, QPainterPath, QPen
 from PySide6.QtCore import Qt, Signal, QSize, QMimeData, QUrl, QPoint, QRectF, QPropertyAnimation, QEasingCurve
 from models import SearchResult
+from ..style_constants import COLORS, FONT, RADIUS, BTN
+from ..style_manager import (
+    scrollbar_style, menu_style, badge_style, badge_brand_style,
+    progress_bar_style, label_caption_style, label_micro_style,
+)
+from ..style_constants import FILE_ICON_MAP
+
+
+class ElidedLabel(QLabel):
+    def __init__(self, text="", parent=None):
+        super().__init__(text, parent)
+        self._full_text = text
+        self._elide_mode = Qt.TextElideMode.ElideRight
+
+    def set_elide_mode(self, mode):
+        self._elide_mode = mode
+
+    def setText(self, text):
+        self._full_text = text
+        super().setText(text)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._update_elided()
+
+    def _update_elided(self):
+        fm = self.fontMetrics()
+        available = self.width()
+        elided = fm.elidedText(self._full_text, self._elide_mode, available)
+        super().setText(elided)
+
+    def minimumSizeHint(self):
+        return QSize(0, super().minimumSizeHint().height())
+
+    def sizeHint(self):
+        return QSize(0, super().minimumSizeHint().height())
 
 
 class RoundedMenu(QMenu):
@@ -45,7 +81,7 @@ class RoundedMenu(QMenu):
         path.addRoundedRect(rect, self._border_radius, self._border_radius)
         painter.setClipPath(path)
 
-        painter.setBrush(QColor("#FFFFFF"))
+        painter.setBrush(QColor(COLORS.BG_PRIMARY))
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawRoundedRect(rect, self._border_radius, self._border_radius)
 
@@ -55,7 +91,7 @@ class RoundedMenu(QMenu):
         border_rect = QRectF(self.rect()).adjusted(1.5, 1.5, -1.5, -1.5)
         border_path.addRoundedRect(border_rect, self._border_radius, self._border_radius)
         painter.setBrush(Qt.BrushStyle.NoBrush)
-        pen = QPen(QColor("#E5E7EB"), 1)
+        pen = QPen(QColor(COLORS.BORDER_DEFAULT), 1)
         pen.setCosmetic(True)
         painter.setPen(pen)
         painter.drawPath(border_path)
@@ -72,80 +108,16 @@ class RoundedMenu(QMenu):
         self.setMask(region)
         self._anim.start()
 
-FILE_ICON_MAP = {
-    '.py': 'doctype/code.svg', '.js': 'doctype/code.svg', '.ts': 'doctype/code.svg',
-    '.java': 'doctype/code.svg', '.c': 'doctype/code.svg', '.cpp': 'doctype/code.svg',
-    '.h': 'doctype/code.svg', '.go': 'doctype/code.svg', '.rs': 'doctype/code.svg',
-    '.rb': 'doctype/code.svg', '.php': 'doctype/code.svg', '.html': 'doctype/code.svg',
-    '.css': 'doctype/code.svg', '.sql': 'doctype/code.svg', '.sh': 'doctype/code.svg',
-    '.bat': 'doctype/code.svg', '.ps1': 'doctype/code.svg',
-    '.txt': 'doctype/TXT.svg', '.md': 'doctype/TXT.svg', '.log': 'doctype/TXT.svg',
-    '.json': 'doctype/TXT.svg', '.xml': 'doctype/TXT.svg', '.csv': 'doctype/TXT.svg',
-    '.yaml': 'doctype/TXT.svg', '.yml': 'doctype/TXT.svg', '.ini': 'doctype/TXT.svg',
-    '.cfg': 'doctype/TXT.svg', '.conf': 'doctype/TXT.svg', '.toml': 'doctype/TXT.svg',
-    '.pdf': 'doctype/PDF.svg', '.doc': 'doctype/Doc.svg', '.docx': 'doctype/Doc.svg',
-    '.xls': 'doctype/Excel.svg', '.xlsx': 'doctype/Excel.svg',
-    '.ppt': 'doctype/PPT.svg', '.pptx': 'doctype/PPT.svg',
-    '.gif': 'doctype/Gif.svg', '.mp3': 'doctype/Mp3.svg', '.wav': 'doctype/Wav.svg',
-    '.flac': 'doctype/Wav.svg', '.aac': 'doctype/Wav.svg',
-    '.mov': 'doctype/Mov.svg', '.mp4': 'doctype/Mov.svg', '.avi': 'doctype/Mov.svg',
-    '.mkv': 'doctype/Mov.svg',
-    '.zip': 'doctype/Zip.svg', '.rar': 'doctype/Zip.svg', '.7z': 'doctype/Zip.svg',
-    '.tar': 'doctype/Zip.svg', '.gz': 'doctype/Zip.svg',
-    '.svg': 'doctype/Svg.svg', '.ai': 'doctype/Ai.svg', '.psd': 'doctype/Ps.svg',
-    '.ae': 'doctype/Ae.svg', '.prproj': 'doctype/Pr.svg', '.xd': 'doctype/Xd.svg',
-    '.rp': 'doctype/Rp.svg', '.swf': 'doctype/Swf.svg',
-    '.jpg': 'doctype/图片.svg', '.jpeg': 'doctype/图片.svg', '.png': 'doctype/图片.svg',
-    '.bmp': 'doctype/图片.svg', '.tiff': 'doctype/图片.svg', '.ico': 'doctype/图片.svg',
-    '.epub': 'doctype/图书.svg', '.xmind': 'doctype/思维导图.svg',
-}
-
-SCROLLBAR_STYLE = """
-    QScrollBar:vertical {
-        background: transparent;
-        width: 6px;
-        margin: 0;
-    }
-    QScrollBar::handle:vertical {
-        background: #D1D5DB;
-        min-height: 40px;
-        border-radius: 3px;
-    }
-    QScrollBar::handle:vertical:hover {
-        background: #9CA3AF;
-    }
-    QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-        height: 0px; background: none;
-    }
-    QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
-        background: none;
-    }
-    QScrollBar:horizontal {
-        background: transparent; height: 6px; margin: 0;
-    }
-    QScrollBar::handle:horizontal {
-        background: #D1D5DB; min-width: 40px; border-radius: 3px;
-    }
-    QScrollBar::handle:horizontal:hover {
-        background: #9CA3AF;
-    }
-    QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
-        width: 0px; background: none;
-    }
-    QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
-        background: none;
-    }
-"""
 
 LIST_STYLE = f"""
     QListWidget {{
-        background-color: #FFFFFF;
+        background-color: {COLORS.BG_PRIMARY};
         border: none;
         outline: none;
         padding: 8px 6px;
     }}
     QListWidget::item {{
-        border-radius: 10px;
+        border-radius: {RADIUS.LARGE}px;
         margin: 2px 4px;
         padding: 0px;
         background: transparent;
@@ -157,57 +129,12 @@ LIST_STYLE = f"""
         border: none;
         outline: none;
     }}
-    {SCROLLBAR_STYLE}
+    {scrollbar_style()}
 """
 
-CENTER_PROGRESS_STYLE = """
-    QProgressBar {
-        border: none;
-        background-color: #E5E7EB;
-        border-radius: 4px;
-        height: 8px;
-        text-align: center;
-        font-size: 10px;
-        color: #6B7280;
-        outline: none;
-    }
-    QProgressBar::chunk {
-        background-color: #7C3AED;
-        border-radius: 4px;
-    }
-"""
+CENTER_PROGRESS_STYLE = progress_bar_style(8, 4)
 
-UNIFIED_MENU_STYLE = """
-    QMenu {
-        background-color: #FFFFFF;
-        border: none;
-        padding: 6px 4px;
-    }
-    QMenu::item {
-        padding: 8px 28px 8px 20px;
-        border-radius: 6px;
-        font-size: 13px;
-        color: #1F2937;
-        background: transparent;
-        margin: 1px 4px;
-    }
-    QMenu::item:selected {
-        background-color: #F5F3FF;
-        color: #7C3AED;
-    }
-    QMenu::icon {
-        padding-left: 8px;
-    }
-    QMenu::separator {
-        height: 1px;
-        background: #F3F4F6;
-        margin: 4px 12px;
-    }
-    QMenu::right-arrow {
-        width: 12px;
-        height: 12px;
-    }
-"""
+UNIFIED_MENU_STYLE = menu_style()
 
 
 class ResultItemWidget(QFrame):
@@ -221,7 +148,7 @@ class ResultItemWidget(QFrame):
 
     def _get_icon_name(self) -> str:
         if self._result.file_item.is_directory:
-            return 'folder-open.svg'
+            return 'doctype/Folder.svg'
         ext = self._result.file_item.extension.lower()
         return FILE_ICON_MAP.get(ext, 'file(solid).svg')
 
@@ -260,65 +187,43 @@ class ResultItemWidget(QFrame):
         name_row = QHBoxLayout()
         name_row.setSpacing(8)
 
-        name_label = QLabel(self._result.file_item.name)
+        name_label = ElidedLabel(self._result.file_item.name)
         name_font = QFont()
-        name_font.setPointSize(13)
+        name_font.setPointSize(FONT.BODY_PT)
         name_font.setBold(True)
         name_label.setFont(name_font)
-        name_label.setStyleSheet("color: #111827; background: transparent; border: none;")
+        name_label.setStyleSheet(f"color: {COLORS.TEXT_PRIMARY}; background: transparent; border: none;")
         name_label.setTextFormat(Qt.TextFormat.PlainText)
+        name_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
         match_badge = self._get_match_badge()
         match_label = QLabel(match_badge)
-        match_label.setStyleSheet("color: #7C3AED; font-size: 12px; font-weight: bold; background: transparent; border: none;")
+        match_label.setStyleSheet(f"color: {COLORS.BRAND}; font-size: {BTN.SMALL_FONT_SIZE}; font-weight: bold; background: transparent; border: none;")
 
-        name_row.addWidget(name_label)
+        name_row.addWidget(name_label, 1)
         if match_badge:
             name_row.addWidget(match_label)
-        name_row.addStretch()
 
         dir_path = os.path.dirname(self._result.file_item.path)
-        path_label = QLabel(dir_path)
+        path_label = ElidedLabel(dir_path)
         path_font = QFont()
-        path_font.setPointSize(11)
+        path_font.setPointSize(FONT.MICRO_PT)
         path_label.setFont(path_font)
-        path_label.setStyleSheet("color: #6B7280; background: transparent; border: none;")
-        fm = QFontMetrics(path_font)
-        elided = fm.elidedText(dir_path, Qt.TextElideMode.ElideLeft, 500)
-        path_label.setText(elided)
+        path_label.setStyleSheet(f"color: {COLORS.TEXT_TERTIARY}; background: transparent; border: none;")
+        path_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        path_label.set_elide_mode(Qt.TextElideMode.ElideLeft)
 
         info_row = QHBoxLayout()
         info_row.setSpacing(10)
 
         type_label = QLabel(self._get_type_label())
-        type_label.setStyleSheet("""
-            background-color: #F3F4F6;
-            color: #4B5563;
-            border-radius: 5px;
-            padding: 2px 8px;
-            font-size: 11px;
-            border: none;
-        """)
+        type_label.setStyleSheet(badge_style())
 
         size_label = QLabel(self._result.file_item.size_display)
-        size_label.setStyleSheet("""
-            background-color: #F3F4F6;
-            color: #4B5563;
-            border-radius: 5px;
-            padding: 2px 8px;
-            font-size: 11px;
-            border: none;
-        """)
+        size_label.setStyleSheet(badge_style())
 
         date_label = QLabel(self._result.file_item.modified_date)
-        date_label.setStyleSheet("""
-            background-color: #F3F4F6;
-            color: #4B5563;
-            border-radius: 5px;
-            padding: 2px 8px;
-            font-size: 11px;
-            border: none;
-        """)
+        date_label.setStyleSheet(badge_style())
 
         info_row.addWidget(type_label)
         if size_label.text():
@@ -328,15 +233,7 @@ class ResultItemWidget(QFrame):
 
         if self._result.file_item.is_directory and self._result.file_item.item_count > 0:
             item_count_label = QLabel(self._result.file_item.item_count_display)
-            item_count_label.setStyleSheet("""
-                background-color: #EDE9FE;
-                color: #7C3AED;
-                border-radius: 5px;
-                padding: 2px 8px;
-                font-size: 11px;
-                font-weight: bold;
-                border: none;
-            """)
+            item_count_label.setStyleSheet(badge_brand_style())
             info_row.addWidget(item_count_label)
 
         info_row.addStretch()
@@ -355,25 +252,25 @@ class ResultItemWidget(QFrame):
         self._apply_default_style()
 
     def _apply_default_style(self):
-        self.setStyleSheet("""
-            QFrame#resultItemWidget {
-                background-color: #FFFFFF;
-                border-radius: 10px;
+        self.setStyleSheet(f"""
+            QFrame#resultItemWidget {{
+                background-color: {COLORS.BG_PRIMARY};
+                border-radius: {RADIUS.LARGE}px;
                 border: 1px solid transparent;
-            }
-            QFrame#resultItemWidget:hover {
-                background-color: #F9FAFB;
-                border: 1px solid #E5E7EB;
-            }
+            }}
+            QFrame#resultItemWidget:hover {{
+                background-color: {COLORS.BG_TERTIARY};
+                border: 1px solid {COLORS.BORDER_DEFAULT};
+            }}
         """)
 
     def _apply_selected_style(self):
-        self.setStyleSheet("""
-            QFrame#resultItemWidget {
-                background-color: #F5F3FF;
-                border-radius: 10px;
-                border: 2px solid #7C3AED;
-            }
+        self.setStyleSheet(f"""
+            QFrame#resultItemWidget {{
+                background-color: {COLORS.BRAND_LIGHT_BG};
+                border-radius: {RADIUS.LARGE}px;
+                border: 2px solid {COLORS.BRAND};
+            }}
         """)
 
     def set_selected(self, selected: bool):
@@ -418,11 +315,11 @@ class ResultListWidget(QListWidget):
 
     def _setup_progress_overlay(self):
         self._progress_overlay = QFrame(self)
-        self._progress_overlay.setStyleSheet("""
-            QFrame {
-                background-color: rgba(255, 255, 255, 220);
-                border-radius: 12px;
-            }
+        self._progress_overlay.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLORS.OVERLAY_LIGHT};
+                border-radius: {RADIUS.XLARGE}px;
+            }}
         """)
         overlay_layout = QVBoxLayout(self._progress_overlay)
         overlay_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -431,10 +328,10 @@ class ResultListWidget(QListWidget):
 
         self._progress_label = QLabel("正在搜索...")
         self._progress_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._progress_label.setStyleSheet("""
+        self._progress_label.setStyleSheet(f"""
             font-size: 15px;
             font-weight: bold;
-            color: #4B5563;
+            color: {COLORS.TEXT_SECONDARY};
             background: transparent;
             border: none;
         """)
@@ -469,18 +366,18 @@ class ResultListWidget(QListWidget):
 
         self._empty_text_label = QLabel("未找到匹配文件")
         self._empty_text_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._empty_text_label.setStyleSheet("""
-            font-size: 16px;
-            color: #9CA3AF;
+        self._empty_text_label.setStyleSheet(f"""
+            font-size: {FONT.DISPLAY_PT}px;
+            color: {COLORS.TEXT_PLACEHOLDER};
             background: transparent;
             border: none;
         """)
 
         hint_label = QLabel("尝试修改搜索条件或扩大搜索范围")
         hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        hint_label.setStyleSheet("""
-            font-size: 13px;
-            color: #D1D5DB;
+        hint_label.setStyleSheet(f"""
+            font-size: {BTN.FONT_SIZE};
+            color: {COLORS.BORDER_HOVER};
             background: transparent;
             border: none;
         """)
@@ -714,11 +611,11 @@ class ResultListWidget(QListWidget):
         drag.setMimeData(mime_data)
 
         pixmap = QPixmap(160, 40)
-        pixmap.fill(QColor("#7C3AED"))
+        pixmap.fill(QColor(COLORS.BRAND))
         painter = QPainter(pixmap)
-        painter.setPen(QColor("#FFFFFF"))
+        painter.setPen(QColor(COLORS.BG_PRIMARY))
         font = QFont()
-        font.setPointSize(10)
+        font.setPointSize(FONT.MICRO_PT)
         painter.setFont(font)
         text = results[0].file_item.name if len(results) == 1 else f"{len(results)} 个文件"
         painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, text)

@@ -75,9 +75,10 @@ def is_binary_file(file_path: str) -> bool:
             if b'\x00' in chunk:
                 return True
             text_characters = bytearray({7, 8, 9, 10, 12, 13, 27} | set(range(0x20, 0x100)) - {0x7f})
-            if chunk.translate(None, text_characters):
-                return False
-            return True
+            non_text = chunk.translate(None, text_characters)
+            if non_text:
+                return True
+            return False
     except Exception:
         return True
 

@@ -1,6 +1,6 @@
 import os
 import json
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 DEFAULT_CONFIG = {
     "general": {
@@ -13,6 +13,7 @@ DEFAULT_CONFIG = {
     "search": {
         "default_dirs": [],
         "scanned_dirs": [],
+        "scan_status": {},
         "exclude_dirs": [
             "C:\\Windows",
             "C:\\Program Files",
@@ -33,6 +34,11 @@ DEFAULT_CONFIG = {
         "show_status_bar": True
     }
 }
+
+SCAN_STATUS_COMPLETE = "complete"
+SCAN_STATUS_INCOMPLETE = "incomplete"
+SCAN_STATUS_FAILED = "failed"
+SCAN_STATUS_SCANNING = "scanning"
 
 def get_config_dir() -> str:
     home = os.path.expanduser("~")
@@ -95,6 +101,66 @@ def get_scanned_dirs() -> List[str]:
 def save_scanned_dirs(dirs: List[str]) -> None:
     config = load_config()
     config["search"]["scanned_dirs"] = list(dirs)
+    save_config(config)
+
+def get_scan_status(dir_path: str) -> Optional[str]:
+    """
+    获取指定目录的扫描状态。
+
+    Args:
+        dir_path: 目录路径
+
+    Returns:
+        扫描状态字符串（complete/incomplete/failed/scanning），如果无记录返回 None
+    """
+    config = load_config()
+    status_map = config.get("search", {}).get("scan_status", {})
+    normalized = os.path.normpath(dir_path)
+    return status_map.get(normalized)
+
+def set_scan_status(dir_path: str, status: str) -> None:
+    """
+    设置指定目录的扫描状态。
+
+    Args:
+        dir_path: 目录路径
+        status: 扫描状态（SCAN_STATUS_COMPLETE/INCOMPLETE/FAILED/SCANNING）
+    """
+    config = load_config()
+    config.setdefault("search", {}).setdefault("scan_status", {})
+    normalized = os.path.normpath(dir_path)
+    config["search"]["scan_status"][normalized] = status
+    save_config(config)
+
+def set_scan_status_batch(dir_status_map: Dict[str, str]) -> None:
+    """
+    批量设置多个目录的扫描状态。
+
+    Args:
+        dir_status_map: 目录路径到扫描状态的映射
+    """
+    config = load_config()
+    config.setdefault("search", {}).setdefault("scan_status", {})
+    for dir_path, status in dir_status_map.items():
+        normalized = os.path.normpath(dir_path)
+        config["search"]["scan_status"][normalized] = status
+    save_config(config)
+
+def get_incomplete_scan_dirs() -> List[str]:
+    """
+    获取所有扫描未完成或失败的目录列表。
+
+    Returns:
+        未完成扫描的目录路径列表
+    """
+    config = load_config()
+    status_map = config.get("search", {}).get("scan_status", {})
+    return [d for d, s in status_map.items() if s in (SCAN_STATUS_INCOMPLETE, SCAN_STATUS_FAILED, SCAN_STATUS_SCANNING)]
+
+def clear_scan_status() -> None:
+    """清除所有扫描状态记录。"""
+    config = load_config()
+    config.setdefault("search", {})["scan_status"] = {}
     save_config(config)
 
 def is_first_launch() -> bool:

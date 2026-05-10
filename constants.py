@@ -6,7 +6,7 @@ DEFAULT_WINDOW_HEIGHT = 600
 
 SEARCH_DEBOUNCE_MS = 300
 MAX_WORKERS = 4
-BATCH_SIZE = 100
+BATCH_SIZE = 500
 
 TEXT_EXTENSIONS = {
     '.txt', '.md', '.log', '.csv', '.json', '.xml',

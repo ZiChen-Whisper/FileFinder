@@ -1,36 +1,7 @@
-import os
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QHBoxLayout
-from PySide6.QtGui import QFont, QFontMetrics, QIcon
-from PySide6.QtCore import QSize, Qt
-from models import SearchResult
-
-FILE_ICON_MAP = {
-    '.py': 'doctype/code.svg', '.js': 'doctype/code.svg', '.ts': 'doctype/code.svg',
-    '.java': 'doctype/code.svg', '.c': 'doctype/code.svg', '.cpp': 'doctype/code.svg',
-    '.h': 'doctype/code.svg', '.go': 'doctype/code.svg', '.rs': 'doctype/code.svg',
-    '.rb': 'doctype/code.svg', '.php': 'doctype/code.svg', '.html': 'doctype/code.svg',
-    '.css': 'doctype/code.svg', '.sql': 'doctype/code.svg', '.sh': 'doctype/code.svg',
-    '.bat': 'doctype/code.svg', '.ps1': 'doctype/code.svg',
-    '.txt': 'doctype/TXT.svg', '.md': 'doctype/TXT.svg', '.log': 'doctype/TXT.svg',
-    '.json': 'doctype/TXT.svg', '.xml': 'doctype/TXT.svg', '.csv': 'doctype/TXT.svg',
-    '.yaml': 'doctype/TXT.svg', '.yml': 'doctype/TXT.svg', '.ini': 'doctype/TXT.svg',
-    '.cfg': 'doctype/TXT.svg', '.conf': 'doctype/TXT.svg', '.toml': 'doctype/TXT.svg',
-    '.pdf': 'doctype/PDF.svg', '.doc': 'doctype/Doc.svg', '.docx': 'doctype/Doc.svg',
-    '.xls': 'doctype/Excel.svg', '.xlsx': 'doctype/Excel.svg',
-    '.ppt': 'doctype/PPT.svg', '.pptx': 'doctype/PPT.svg',
-    '.gif': 'doctype/Gif.svg', '.mp3': 'doctype/Mp3.svg', '.wav': 'doctype/Wav.svg',
-    '.flac': 'doctype/Wav.svg', '.aac': 'doctype/Wav.svg',
-    '.mov': 'doctype/Mov.svg', '.mp4': 'doctype/Mov.svg', '.avi': 'doctype/Mov.svg',
-    '.mkv': 'doctype/Mov.svg',
-    '.zip': 'doctype/Zip.svg', '.rar': 'doctype/Zip.svg', '.7z': 'doctype/Zip.svg',
-    '.tar': 'doctype/Zip.svg', '.gz': 'doctype/Zip.svg',
-    '.svg': 'doctype/Svg.svg', '.ai': 'doctype/Ai.svg', '.psd': 'doctype/Ps.svg',
-    '.ae': 'doctype/Ae.svg', '.prproj': 'doctype/Pr.svg', '.xd': 'doctype/Xd.svg',
-    '.rp': 'doctype/Rp.svg', '.swf': 'doctype/Swf.svg',
-    '.jpg': 'doctype/图片.svg', '.jpeg': 'doctype/图片.svg', '.png': 'doctype/图片.svg',
-    '.bmp': 'doctype/图片.svg', '.tiff': 'doctype/图片.svg', '.ico': 'doctype/图片.svg',
-    '.epub': 'doctype/图书.svg', '.xmind': 'doctype/思维导图.svg',
-}
+from PySide6.QtGui import QFont, QIcon
+from PySide6.QtCore import Qt, QSize
+from ..style_constants import COLORS, FONT, FILE_ICON_MAP
 
 
 class PreviewPanel(QWidget):
@@ -44,94 +15,80 @@ class PreviewPanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        header_widget = QWidget()
-        header_widget.setFixedHeight(38)
-        header_widget.setStyleSheet("""
-            background-color: #FAFAFA;
-            border-bottom: 1px solid #E5E7EB;
-        """)
-        header_layout = QHBoxLayout()
-        header_layout.setContentsMargins(14, 0, 14, 0)
+        self.header_widget = QWidget()
+        header_layout = QHBoxLayout(self.header_widget)
+        header_layout.setContentsMargins(16, 10, 16, 10)
+        header_layout.setSpacing(8)
 
-        self.title_icon = QLabel()
-        self.title_icon.setPixmap(QIcon("icons/document(solid).svg").pixmap(QSize(20, 20)))
+        self.icon_label = QLabel()
+        self.icon_label.setFixedSize(20, 20)
+        self.icon_label.setStyleSheet("border: none; background: transparent;")
 
-        self.title_label = QLabel("内容预览")
+        self.title_label = QLabel("预览")
         title_font = QFont()
+        title_font.setPointSize(FONT.BODY_PT)
         title_font.setBold(True)
-        title_font.setPointSize(13)
         self.title_label.setFont(title_font)
-        self.title_label.setStyleSheet("color: #1F2937;")
-        self.title_label.setMinimumWidth(1)
+        self.title_label.setStyleSheet(f"color: {COLORS.TEXT_PRIMARY};")
 
-        header_layout.addWidget(self.title_icon)
-        header_layout.addWidget(self.title_label, 1)
+        header_layout.addWidget(self.icon_label)
+        header_layout.addWidget(self.title_label)
+        header_layout.addStretch()
 
-        header_widget.setLayout(header_layout)
-        layout.addWidget(header_widget)
-
-        self.empty_placeholder = QLabel("无预览内容")
-        self.empty_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.empty_placeholder.setStyleSheet("""
-            QLabel {
-                background-color: #FFFFFF;
-                color: #9CA3AF;
-                font-size: 16px;
-                font-weight: bold;
-                border: none;
-            }
+        self.header_widget.setStyleSheet(f"""
+            QWidget {{
+                background-color: {COLORS.BG_SECONDARY};
+                border-bottom: 1px solid {COLORS.BORDER_DEFAULT};
+            }}
         """)
-        self.empty_placeholder.setVisible(True)
-        layout.addWidget(self.empty_placeholder)
+
+        self.content_label = QLabel("选择文件以预览内容")
+        self.content_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.content_label.setWordWrap(True)
+        self.content_label.setStyleSheet(f"""
+            background-color: {COLORS.BG_PRIMARY};
+            color: {COLORS.TEXT_PLACEHOLDER};
+            font-size: {FONT.DISPLAY_PT}px;
+            border: none;
+        """)
+
+        self.empty_placeholder = QLabel("选择文件以预览内容")
+        self.empty_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.empty_placeholder.setStyleSheet(f"""
+            background-color: {COLORS.BG_PRIMARY};
+            color: {COLORS.TEXT_PLACEHOLDER};
+            font-size: {FONT.DISPLAY_PT}px;
+            border: none;
+        """)
+
+        layout.addWidget(self.header_widget)
+        layout.addWidget(self.empty_placeholder, 1)
 
         self.setLayout(layout)
-        self.setStyleSheet("""
-            QWidget {
-                background-color: #FFFFFF;
-            }
-        """)
+        self.setStyleSheet(f"QWidget {{ background-color: {COLORS.BG_PRIMARY}; }}")
 
-    def _get_icon_name(self, result: SearchResult) -> str:
-        if result.file_item.is_directory:
-            return 'folder-open.svg'
-        ext = result.file_item.extension.lower()
-        return FILE_ICON_MAP.get(ext, 'file(solid).svg')
-
-    def show_result(self, result: SearchResult):
+    def set_result(self, result):
         self._current_result = result
+        if result is None:
+            self.empty_placeholder.setVisible(True)
+            self.content_label.setVisible(False)
+            self.title_label.setText("预览")
+            self.icon_label.clear()
+            return
 
-        icon_name = self._get_icon_name(result)
-        self.title_icon.setPixmap(QIcon(f"icons/{icon_name}").pixmap(QSize(20, 20)))
+        self.empty_placeholder.setVisible(False)
+        self.content_label.setVisible(True)
 
-        name = result.file_item.name
-        self.title_label.setText(name)
-        self.title_label.setToolTip(result.file_item.path)
+        file_item = result.file_item
+        self.title_label.setText(file_item.name)
 
-        font = self.title_label.font()
-        fm = QFontMetrics(font)
-        available_width = self.title_label.width()
-        if available_width > 0:
-            elided = fm.elidedText(name, Qt.TextElideMode.ElideRight, available_width)
-            self.title_label.setText(elided)
+        ext = file_item.extension.lower()
+        icon_name = FILE_ICON_MAP.get(ext, 'file(solid).svg')
+        self.icon_label.setPixmap(QIcon(f"icons/{icon_name}").pixmap(QSize(20, 20)))
 
-        self.empty_placeholder.setText("预览功能将在后续版本中完善")
-        self.empty_placeholder.setVisible(True)
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        if self._current_result:
-            name = self._current_result.file_item.name
-            font = self.title_label.font()
-            fm = QFontMetrics(font)
-            available_width = self.title_label.width()
-            if available_width > 0:
-                elided = fm.elidedText(name, Qt.TextElideMode.ElideRight, available_width)
-                self.title_label.setText(elided)
-
-    def clear(self):
+    def clear_preview(self):
         self._current_result = None
-        self.title_icon.setPixmap(QIcon("icons/document(solid).svg").pixmap(QSize(20, 20)))
-        self.title_label.setText("内容预览")
-        self.title_label.setToolTip("")
-        self.empty_placeholder.setText("无预览内容")
+        self.title_label.setText("预览")
+        self.icon_label.clear()
         self.empty_placeholder.setVisible(True)
+        self.content_label.setVisible(False)

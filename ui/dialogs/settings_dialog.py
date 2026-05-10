@@ -1,73 +1,13 @@
-from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QWidget, QMessageBox, QGroupBox, QFrame)
-from PySide6.QtCore import Qt, Signal, QPointF, QRectF
-from PySide6.QtGui import QFont, QPainter, QColor, QPen, QPixmap, QPolygonF
-
-SCROLLBAR_STYLE = """
-    QScrollBar:vertical {
-        background: transparent;
-        width: 6px;
-        margin: 0;
-    }
-    QScrollBar::handle:vertical {
-        background: #D1D5DB;
-        min-height: 40px;
-        border-radius: 3px;
-    }
-    QScrollBar::handle:vertical:hover {
-        background: #9CA3AF;
-    }
-    QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-        height: 0px; background: none;
-    }
-    QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
-        background: none;
-    }
-    QScrollBar:horizontal {
-        background: transparent;
-        height: 6px;
-        margin: 0;
-    }
-    QScrollBar::handle:horizontal {
-        background: #D1D5DB;
-        min-width: 40px;
-        border-radius: 3px;
-    }
-    QScrollBar::handle:horizontal:hover {
-        background: #9CA3AF;
-    }
-    QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
-        width: 0px; background: none;
-    }
-    QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
-        background: none;
-    }
-"""
-
-MSG_BOX_STYLE = """
-    QMessageBox {
-        background-color: #FFFFFF;
-    }
-    QMessageBox QLabel {
-        color: #374151;
-        font-size: 14px;
-        border: none;
-        background: transparent;
-    }
-    QPushButton {
-        padding: 8px 24px;
-        border-radius: 8px;
-        border: 1px solid #E5E7EB;
-        background-color: #FFFFFF;
-        color: #4B5563;
-        font-size: 13px;
-        outline: none;
-        min-width: 80px;
-    }
-    QPushButton:hover {
-        background-color: #F3F4F6;
-        border-color: #D1D5DB;
-    }
-"""
+from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+                             QGroupBox, QComboBox, QFrame, QMessageBox)
+from PySide6.QtGui import QFont, QPixmap, QPainter, QColor, QPen, QPolygonF
+from PySide6.QtCore import Qt, QRectF, QPointF
+from ..style_constants import COLORS, FONT, RADIUS, BTN, DIALOG
+from ..style_manager import (
+    scrollbar_style, msg_box_style, button_primary, button_secondary,
+    button_danger, dialog_frame_style, dialog_title_style, dialog_body_style,
+    dialog_style, group_box_style, danger_zone_style, label_caption_style,
+)
 
 
 class _ModernMessageBox(QDialog):
@@ -78,7 +18,7 @@ class _ModernMessageBox(QDialog):
         self.setWindowTitle(title)
         self.setWindowFlags(self.windowFlags() | Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setMinimumWidth(420)
+        self.setMinimumWidth(DIALOG.MIN_WIDTH)
         self._icon_type = icon_type
         self._title_text = title
         self._text = text
@@ -86,34 +26,28 @@ class _ModernMessageBox(QDialog):
 
     def _init_ui(self):
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(12, 12, 12, 12)
+        outer.setContentsMargins(DIALOG.OUTER_MARGIN, DIALOG.OUTER_MARGIN, DIALOG.OUTER_MARGIN, DIALOG.OUTER_MARGIN)
         shadow_frame = QFrame()
         shadow_frame.setObjectName("shadowFrame")
-        shadow_frame.setStyleSheet("""
-            QFrame#shadowFrame {
-                background-color: #FFFFFF;
-                border-radius: 16px;
-                border: 1px solid #F3F4F6;
-            }
-        """)
+        shadow_frame.setStyleSheet(dialog_frame_style())
         layout = QVBoxLayout(shadow_frame)
-        layout.setSpacing(16)
-        layout.setContentsMargins(28, 28, 28, 24)
+        layout.setSpacing(DIALOG.CONTENT_SPACING)
+        layout.setContentsMargins(DIALOG.PADDING, DIALOG.PADDING, DIALOG.PADDING, 24)
         icon_label = QLabel()
         icon_label.setFixedSize(48, 48)
         icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         icon_label.setPixmap(self._create_icon_pixmap())
         title_label = QLabel(self._title_text)
         title_font = QFont()
-        title_font.setPointSize(14)
+        title_font.setPointSize(FONT.TITLE_PT)
         title_font.setBold(True)
         title_label.setFont(title_font)
-        title_label.setStyleSheet("color: #1F2937; border: none; background: transparent;")
+        title_label.setStyleSheet(dialog_title_style())
         text_label = QLabel(self._text)
-        text_label.setStyleSheet("color: #4B5563; font-size: 14px; line-height: 1.6; border: none; background: transparent;")
+        text_label.setStyleSheet(dialog_body_style())
         text_label.setWordWrap(True)
         content_row = QHBoxLayout()
-        content_row.setSpacing(16)
+        content_row.setSpacing(DIALOG.CONTENT_SPACING)
         content_row.addWidget(icon_label, 0, Qt.AlignmentFlag.AlignTop)
         col = QVBoxLayout()
         col.setSpacing(6)
@@ -127,26 +61,12 @@ class _ModernMessageBox(QDialog):
             btn = QPushButton(label)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             if style_type == 'primary':
-                btn.setStyleSheet("""
-                    QPushButton {
-                        padding: 8px 28px; border-radius: 10px; border: none;
-                        background-color: #7C3AED; color: #FFFFFF;
-                        font-size: 13px; font-weight: bold; outline: none; min-width: 80px;
-                    }
-                    QPushButton:hover { background-color: #6D28D9; }
-                """)
+                btn.setStyleSheet(button_primary("padding: 8px 28px; border-radius: 10px; min-width: 80px;"))
             else:
-                btn.setStyleSheet("""
-                    QPushButton {
-                        padding: 8px 28px; border-radius: 10px;
-                        border: 1px solid #E5E7EB; background-color: #FFFFFF;
-                        color: #4B5563; font-size: 13px; outline: none; min-width: 80px;
-                    }
-                    QPushButton:hover { background-color: #F3F4F6; border-color: #D1D5DB; }
-                """)
+                btn.setStyleSheet(button_secondary("padding: 8px 28px; border-radius: 10px; min-width: 80px;"))
             btn.clicked.connect(lambda checked, k=key: self._on_button(k))
             btn_row.addWidget(btn)
-            btn_row.addSpacing(8)
+            btn_row.addSpacing(DIALOG.BUTTON_SPACING)
         layout.addLayout(content_row)
         layout.addSpacing(8)
         layout.addLayout(btn_row)
@@ -232,232 +152,152 @@ def _styled_msg_box(parent, icon, title, text, buttons=None):
     return QMessageBox.StandardButton.Ok
 
 
-DIALOG_STYLE = """
-    QDialog {
-        background-color: #FFFFFF;
-    }
-    QLabel {
-        color: #1F2937;
-        border: none;
-        background: transparent;
-    }
-"""
-
-BTN_STYLE = """
-    QPushButton {
-        padding: 8px 24px;
-        border-radius: 8px;
-        border: 1px solid #E5E7EB;
-        background-color: #FFFFFF;
-        color: #4B5563;
-        font-size: 13px;
-        outline: none;
-    }
-    QPushButton:hover {
-        background-color: #F3F4F6;
-        border-color: #D1D5DB;
-    }
-"""
-
-PRIMARY_BTN_STYLE = """
-    QPushButton {
-        padding: 8px 24px;
-        border-radius: 8px;
-        border: none;
-        background-color: #7C3AED;
-        color: #FFFFFF;
-        font-size: 13px;
-        font-weight: bold;
-        outline: none;
-    }
-    QPushButton:hover {
-        background-color: #6D28D9;
-    }
-"""
-
-DANGER_BTN_STYLE = """
-    QPushButton {
-        padding: 8px 24px;
-        border-radius: 8px;
-        border: none;
-        background-color: #EF4444;
-        color: #FFFFFF;
-        font-size: 13px;
-        font-weight: bold;
-        outline: none;
-    }
-    QPushButton:hover {
-        background-color: #DC2626;
-    }
-"""
-
-
 class SettingsDialog(QDialog):
-    reset_requested = Signal()
-
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("设置")
         self.setMinimumSize(520, 480)
-        self.setStyleSheet(DIALOG_STYLE + SCROLLBAR_STYLE)
+        self.setStyleSheet(dialog_style() + scrollbar_style())
         self._init_ui()
 
     def _init_ui(self):
         layout = QVBoxLayout()
-        layout.setSpacing(16)
+        layout.setSpacing(20)
         layout.setContentsMargins(24, 24, 24, 20)
 
-        header = QLabel("设置")
-        header_font = QFont()
-        header_font.setPointSize(18)
-        header_font.setBold(True)
-        header.setFont(header_font)
-        layout.addWidget(header)
-
         general_group = QGroupBox("通用设置")
-        general_group.setStyleSheet("""
-            QGroupBox {
-                font-size: 14px;
-                font-weight: bold;
-                color: #374151;
-                border: 1px solid #E5E7EB;
-                border-radius: 8px;
-                margin-top: 12px;
-                padding-top: 20px;
-                background-color: #FAFAFA;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 16px;
-                padding: 0 8px;
-            }
-        """)
+        general_group.setStyleSheet(group_box_style())
         general_layout = QVBoxLayout()
-        general_layout.setSpacing(8)
+        general_layout.setSpacing(12)
+        general_layout.setContentsMargins(16, 8, 16, 16)
 
-        from config import load_config
-        config = load_config()
+        theme_label = QLabel("界面主题")
+        theme_label.setStyleSheet(label_caption_style())
+        self.theme_combo = QComboBox()
+        self.theme_combo.addItems(["跟随系统", "浅色", "深色"])
+        self.theme_combo.setFixedHeight(36)
+        self.theme_combo.setStyleSheet(f"""
+            QComboBox {{
+                padding: 0px 12px;
+                border: {BTN.BORDER_WIDTH} {BTN.BORDER_STYLE} {COLORS.BORDER_DEFAULT};
+                border-radius: {BTN.BORDER_RADIUS}px;
+                background-color: {COLORS.BG_PRIMARY};
+                font-size: {BTN.FONT_SIZE};
+                color: {COLORS.TEXT_PRIMARY};
+                outline: none;
+            }}
+            QComboBox:hover {{
+                border-color: {COLORS.BORDER_HOVER};
+            }}
+            QComboBox::drop-down {{
+                border: none;
+                width: 24px;
+            }}
+        """)
 
-        theme_label = QLabel(f"主题：{config.get('general', {}).get('theme', 'system')}")
-        theme_label.setStyleSheet("font-size: 13px; color: #6B7280; border: none; background: transparent; text-decoration: none;")
+        lang_label = QLabel("语言")
+        lang_label.setStyleSheet(label_caption_style())
+        self.lang_combo = QComboBox()
+        self.lang_combo.addItems(["简体中文"])
+        self.lang_combo.setFixedHeight(36)
+        self.lang_combo.setStyleSheet(self.theme_combo.styleSheet())
 
-        lang_label = QLabel(f"语言：{config.get('general', {}).get('language', 'zh_CN')}")
-        lang_label.setStyleSheet("font-size: 13px; color: #6B7280; border: none; background: transparent; text-decoration: none;")
-
-        shortcut_label = QLabel(f"全局快捷键：{config.get('general', {}).get('global_shortcut', 'Ctrl+Alt+F')}")
-        shortcut_label.setStyleSheet("font-size: 13px; color: #6B7280; border: none; background: transparent; text-decoration: none;")
+        shortcut_label = QLabel("全局快捷键")
+        shortcut_label.setStyleSheet(label_caption_style())
+        self.shortcut_combo = QComboBox()
+        self.shortcut_combo.addItems(["Ctrl+Shift+F", "Alt+F", "自定义"])
+        self.shortcut_combo.setFixedHeight(36)
+        self.shortcut_combo.setStyleSheet(self.theme_combo.styleSheet())
 
         general_layout.addWidget(theme_label)
+        general_layout.addWidget(self.theme_combo)
         general_layout.addWidget(lang_label)
+        general_layout.addWidget(self.lang_combo)
         general_layout.addWidget(shortcut_label)
+        general_layout.addWidget(self.shortcut_combo)
         general_group.setLayout(general_layout)
-        layout.addWidget(general_group)
 
         search_group = QGroupBox("搜索设置")
-        search_group.setStyleSheet("""
-            QGroupBox {
-                font-size: 14px;
-                font-weight: bold;
-                color: #374151;
-                border: 1px solid #E5E7EB;
-                border-radius: 8px;
-                margin-top: 12px;
-                padding-top: 20px;
-                background-color: #FAFAFA;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 16px;
-                padding: 0 8px;
-            }
-        """)
+        search_group.setStyleSheet(group_box_style())
         search_layout = QVBoxLayout()
-        search_layout.setSpacing(8)
+        search_layout.setSpacing(12)
+        search_layout.setContentsMargins(16, 8, 16, 16)
 
-        search_config = config.get("search", {})
-        max_results_label = QLabel(f"最大结果数：{search_config.get('max_results', 1000)}")
-        max_results_label.setStyleSheet("font-size: 13px; color: #6B7280; border: none; background: transparent; text-decoration: none;")
+        max_results_label = QLabel("最大结果数")
+        max_results_label.setStyleSheet(label_caption_style())
+        self.max_results_combo = QComboBox()
+        self.max_results_combo.addItems(["100", "500", "1000", "2000", "5000"])
+        self.max_results_combo.setCurrentIndex(2)
+        self.max_results_combo.setFixedHeight(36)
+        self.max_results_combo.setStyleSheet(self.theme_combo.styleSheet())
 
-        content_max_label = QLabel(f"内容搜索文件大小上限：{search_config.get('content_max_size_mb', 10)} MB")
-        content_max_label.setStyleSheet("font-size: 13px; color: #6B7280; border: none; background: transparent; text-decoration: none;")
-
-        case_label = QLabel(f"区分大小写：{'是' if search_config.get('case_sensitive', False) else '否'}")
-        case_label.setStyleSheet("font-size: 13px; color: #6B7280; border: none; background: transparent; text-decoration: none;")
-
-        scanned_dirs = search_config.get("scanned_dirs", [])
-        scanned_label = QLabel(f"已扫描目录：{len(scanned_dirs)} 个")
-        scanned_label.setStyleSheet("font-size: 13px; color: #6B7280; border: none; background: transparent; text-decoration: none;")
+        max_file_size_label = QLabel("内容搜索最大文件大小 (MB)")
+        max_file_size_label.setStyleSheet(label_caption_style())
+        self.max_file_size_combo = QComboBox()
+        self.max_file_size_combo.addItems(["1", "5", "10", "20", "50"])
+        self.max_file_size_combo.setCurrentIndex(2)
+        self.max_file_size_combo.setFixedHeight(36)
+        self.max_file_size_combo.setStyleSheet(self.theme_combo.styleSheet())
 
         search_layout.addWidget(max_results_label)
-        search_layout.addWidget(content_max_label)
-        search_layout.addWidget(case_label)
-        search_layout.addWidget(scanned_label)
+        search_layout.addWidget(self.max_results_combo)
+        search_layout.addWidget(max_file_size_label)
+        search_layout.addWidget(self.max_file_size_combo)
         search_group.setLayout(search_layout)
-        layout.addWidget(search_group)
 
-        layout.addStretch()
-
-        danger_zone = QGroupBox("危险操作")
-        danger_zone.setStyleSheet("""
-            QGroupBox {
-                font-size: 14px;
-                font-weight: bold;
-                color: #EF4444;
-                border: 1px solid #FCA5A5;
-                border-radius: 8px;
-                margin-top: 12px;
-                padding-top: 20px;
-                background-color: #FEF2F2;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 16px;
-                padding: 0 8px;
-            }
-        """)
+        danger_zone = QGroupBox("危险区域")
+        danger_zone.setStyleSheet(danger_zone_style())
         danger_layout = QVBoxLayout()
-        danger_layout.setSpacing(8)
+        danger_layout.setSpacing(12)
+        danger_layout.setContentsMargins(16, 8, 16, 16)
 
-        reset_desc = QLabel("恢复默认设置将清除所有用户自定义配置，包括已扫描目录、\n搜索历史和文件索引。此操作不可恢复。")
-        reset_desc.setStyleSheet("font-size: 13px; color: #6B7280; border: none; background: transparent; text-decoration: none;")
+        reset_desc = QLabel("重置所有设置到默认值，此操作不可撤销。")
+        reset_desc.setStyleSheet(label_caption_style())
 
-        reset_btn = QPushButton("恢复默认设置")
-        reset_btn.setStyleSheet(DANGER_BTN_STYLE)
-        reset_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        reset_btn.clicked.connect(self._on_reset_clicked)
+        self.reset_btn = QPushButton("重置设置")
+        self.reset_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.reset_btn.setStyleSheet(button_danger())
+        self.reset_btn.clicked.connect(self._on_reset)
 
         danger_layout.addWidget(reset_desc)
-        danger_layout.addWidget(reset_btn, 0, Qt.AlignmentFlag.AlignRight)
+        danger_layout.addWidget(self.reset_btn)
         danger_zone.setLayout(danger_layout)
-        layout.addWidget(danger_zone)
 
         btn_row = QHBoxLayout()
         btn_row.addStretch()
 
-        close_btn = QPushButton("关闭")
-        close_btn.setStyleSheet(BTN_STYLE)
-        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        close_btn.clicked.connect(self.accept)
+        self.close_btn = QPushButton("关闭")
+        self.close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.close_btn.setStyleSheet(button_secondary())
+        self.close_btn.clicked.connect(self.accept)
 
-        btn_row.addWidget(close_btn)
+        btn_row.addWidget(self.close_btn)
 
+        layout.addWidget(general_group)
+        layout.addWidget(search_group)
+        layout.addWidget(danger_zone)
+        layout.addStretch()
         layout.addLayout(btn_row)
 
         self.setLayout(layout)
 
-    def _on_reset_clicked(self):
-        reply = _styled_msg_box(
-            self, QMessageBox.Icon.Warning,
-            "恢复默认设置",
-            "此操作将删除所有用户自定义设置，包括：\n\n"
-            "  \u2022 所有已扫描目录的记录\n"
-            "  \u2022 所有用户偏好设置\n"
-            "  \u2022 搜索历史记录\n"
-            "  \u2022 文件索引数据库\n"
-            "  \u2022 自定义搜索范围\n\n"
-            "此操作不可恢复！确定要继续吗？",
+    def _on_reset(self):
+        result = _styled_msg_box(
+            self,
+            QMessageBox.Icon.Question,
+            "确认重置",
+            "确定要重置所有设置到默认值吗？此操作不可撤销。",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
-        if reply == QMessageBox.StandardButton.Yes:
-            self.reset_requested.emit()
-            self.accept()
+        if result == QMessageBox.StandardButton.Yes:
+            self.theme_combo.setCurrentIndex(0)
+            self.lang_combo.setCurrentIndex(0)
+            self.shortcut_combo.setCurrentIndex(0)
+            self.max_results_combo.setCurrentIndex(2)
+            self.max_file_size_combo.setCurrentIndex(2)
+            _styled_msg_box(
+                self,
+                QMessageBox.Icon.Information,
+                "重置完成",
+                "所有设置已恢复为默认值。"
+            )

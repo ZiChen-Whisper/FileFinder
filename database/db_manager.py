@@ -1,8 +1,12 @@
 import os
 import sys
 import sqlite3
+import logging
 import threading
 from config import get_config_dir
+
+logger = logging.getLogger(__name__)
+
 
 class SearchCache:
     def __init__(self):
@@ -221,7 +225,16 @@ class DatabaseManager:
             conn.close()
         self._search_cache.invalidate()
 
-    def insert_file_batch(self, rows: list):
+    def insert_file_batch(self, rows: list, skip_cache_invalidate: bool = False):
+        """
+        批量插入文件索引记录。
+
+        Args:
+            rows: 文件记录列表，每条格式为 (path, name, ext, size, mtime, is_dir, item_count)
+            skip_cache_invalidate: 为 True 时跳过缓存失效（扫描期间使用，避免反复重建缓存）
+        """
+        if not rows:
+            return
         conn = self._get_conn()
         try:
             cursor = conn.cursor()
@@ -240,7 +253,83 @@ class DatabaseManager:
             conn.commit()
         finally:
             conn.close()
+        if not skip_cache_invalidate:
+            self._search_cache.invalidate()
+
+    def update_folder_sizes(self, dir_sizes: dict, skip_cache_invalidate: bool = False):
+        """
+        批量更新目录大小。
+
+        Args:
+            dir_sizes: 目录路径到大小的映射
+            skip_cache_invalidate: 为 True 时跳过缓存失效（扫描期间使用）
+        """
+        if not dir_sizes:
+            return
+        conn = self._get_conn()
+        try:
+            cursor = conn.cursor()
+            cursor.executemany(
+                "UPDATE file_index_cache SET size = ? WHERE path = ? AND is_directory = 1",
+                [(total_size, dir_path) for dir_path, total_size in dir_sizes.items()]
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        if not skip_cache_invalidate:
+            self._search_cache.invalidate()
+
+    def delete_entries_by_prefix(self, prefix: str) -> int:
+        """
+        删除指定路径前缀下的所有索引条目。
+
+        Args:
+            prefix: 路径前缀
+
+        Returns:
+            删除的行数
+        """
+        conn = self._get_conn()
+        try:
+            cursor = conn.cursor()
+            like_pattern = prefix.replace('\\', '/').rstrip('/') + '/%'
+            cursor.execute(
+                "DELETE FROM file_index_cache WHERE path LIKE ? ESCAPE '\\'",
+                (like_pattern,)
+            )
+            deleted = cursor.rowcount
+            cursor.execute(
+                "DELETE FROM file_index_cache WHERE path = ?",
+                (prefix,)
+            )
+            deleted += cursor.rowcount
+            conn.commit()
+            return deleted
+        finally:
+            conn.close()
         self._search_cache.invalidate()
+
+    def get_paths_by_parent(self, parent_dir: str) -> list:
+        """
+        获取指定父目录下的所有条目路径（用于增量同步）。
+
+        Args:
+            parent_dir: 父目录路径
+
+        Returns:
+            该目录下所有条目的路径列表
+        """
+        conn = self._get_conn()
+        try:
+            cursor = conn.cursor()
+            like_pattern = parent_dir.replace('\\', '/').rstrip('/') + '/%'
+            cursor.execute(
+                "SELECT path FROM file_index_cache WHERE path LIKE ? ESCAPE '\\' OR path = ?",
+                (like_pattern, parent_dir)
+            )
+            return [row["path"] for row in cursor.fetchall()]
+        finally:
+            conn.close()
 
     def search_files(self, pattern: str, case_sensitive: bool = False,
                      file_types: list = None, exclude_file_types: list = None,
@@ -274,17 +363,6 @@ class DatabaseManager:
             return cursor.fetchall()
         finally:
             conn.close()
-
-    def update_folder_sizes(self, dir_sizes: dict):
-        conn = self._get_conn()
-        try:
-            cursor = conn.cursor()
-            for dir_path, total_size in dir_sizes.items():
-                cursor.execute("UPDATE file_index_cache SET size = ? WHERE path = ? AND is_directory = 1", (total_size, dir_path))
-            conn.commit()
-        finally:
-            conn.close()
-        self._search_cache.invalidate()
 
     def update_file_entry(self, old_path: str, new_path: str = None, new_name: str = None,
                           new_ext: str = None, new_size: int = None, new_mtime: float = None):
