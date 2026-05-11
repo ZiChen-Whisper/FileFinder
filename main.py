@@ -1,6 +1,8 @@
 import sys
 import os
 from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QFont
 from ui import MainWindow
 
 def main():
@@ -10,8 +12,14 @@ def main():
         application_path = os.path.dirname(os.path.abspath(__file__))
     
     os.chdir(application_path)
+
+    QApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
     
     app = QApplication(sys.argv)
+    
+    font = app.font()
+    font.setStyleStrategy(font.styleStrategy() | QFont.StyleStrategy.PreferAntialias)
+    app.setFont(font)
     
     window = MainWindow()
     window.show()

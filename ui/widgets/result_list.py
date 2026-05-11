@@ -150,7 +150,7 @@ class ResultItemWidget(QFrame):
         if self._result.file_item.is_directory:
             return 'doctype/Folder.svg'
         ext = self._result.file_item.extension.lower()
-        return FILE_ICON_MAP.get(ext, 'file(solid).svg')
+        return FILE_ICON_MAP.get(ext, 'doctype/File.svg')
 
     def _get_type_label(self) -> str:
         if self._result.file_item.is_directory:

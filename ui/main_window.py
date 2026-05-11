@@ -9,13 +9,14 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QStatusBar,
                              QListWidget, QListWidgetItem, QScrollArea, QAbstractItemView,
                              QTextEdit, QRadioButton, QButtonGroup)
 from PySide6.QtCore import Qt, QThread, Signal, QTimer, QFileSystemWatcher, QPropertyAnimation, QEasingCurve, QRectF, QSize, QPointF, Property
-from PySide6.QtGui import QIcon, QAction, QPainter, QColor, QPen, QFont, QPixmap, QPolygonF
+from PySide6.QtGui import QIcon, QAction, QPainter, QColor, QPen, QFont, QFontMetrics, QPixmap, QPolygonF
 from models.search_query import SearchQuery
 from core.search_engine import SearchEngine
 from .widgets import SearchBar, ResultListWidget, FilterBar, PreviewPanel, RoundedMenu
 from .widgets.filter_bar import DirListWidget
 from .dialogs import SettingsDialog
-from .style_constants import COLORS, FONT, RADIUS, BTN, DIALOG
+from .style_constants import COLORS, FONT, RADIUS, BTN, DIALOG, TRANSITION
+from .modern_dialog import ModernDialogBase
 from .style_manager import (
     scrollbar_style, msg_box_style, status_bar_style, status_divider_style,
     button_primary, button_secondary, button_small_primary, button_small_secondary,
@@ -37,80 +38,61 @@ logger = logging.getLogger(__name__)
 from utils.flow_layout import FlowLayout
 
 
-class ModernMessageBox(QDialog):
+class ModernMessageBox(ModernDialogBase):
     def __init__(self, parent=None, icon_type='info', title='', text='',
                  buttons=None, default_button=None):
-        super().__init__(parent)
+        super().__init__(parent, title=title, min_width=DIALOG.MIN_WIDTH, resizable=False)
         self._result = None
         self._buttons = buttons or {}
-        self.setWindowTitle(title)
-        self.setWindowFlags(self.windowFlags() | Qt.WindowType.FramelessWindowHint)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setMinimumWidth(DIALOG.MIN_WIDTH)
         self._icon_type = icon_type
-        self._title_text = title
         self._text = text
         self._default_button = default_button
         self._init_ui()
 
     def _init_ui(self):
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(DIALOG.OUTER_MARGIN, DIALOG.OUTER_MARGIN, DIALOG.OUTER_MARGIN, DIALOG.OUTER_MARGIN)
+        def build_content(content_widget):
+            layout = QVBoxLayout(content_widget)
+            layout.setSpacing(DIALOG.CONTENT_SPACING)
+            layout.setContentsMargins(DIALOG.PADDING, 4, DIALOG.PADDING, DIALOG.PADDING)
 
-        shadow_frame = QFrame()
-        shadow_frame.setObjectName("shadowFrame")
-        shadow_frame.setStyleSheet(dialog_frame_style())
+            icon_label = QLabel()
+            icon_label.setFixedSize(48, 48)
+            icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            pixmap = self._create_icon_pixmap()
+            icon_label.setPixmap(pixmap)
 
-        layout = QVBoxLayout(shadow_frame)
-        layout.setSpacing(DIALOG.CONTENT_SPACING)
-        layout.setContentsMargins(DIALOG.PADDING, DIALOG.PADDING, DIALOG.PADDING, 24)
+            text_label = QLabel(self._text)
+            text_label.setStyleSheet(dialog_body_style())
+            text_label.setWordWrap(True)
 
-        icon_label = QLabel()
-        icon_label.setFixedSize(48, 48)
-        icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        pixmap = self._create_icon_pixmap()
-        icon_label.setPixmap(pixmap)
+            content_row = QHBoxLayout()
+            content_row.setSpacing(DIALOG.CONTENT_SPACING)
+            content_row.addWidget(icon_label, 0, Qt.AlignmentFlag.AlignTop)
+            content_row.addLayout(self._build_text_column(text_label), 1)
 
-        title_label = QLabel(self._title_text)
-        title_font = QFont()
-        title_font.setPointSize(FONT.TITLE_PT)
-        title_font.setBold(True)
-        title_label.setFont(title_font)
-        title_label.setStyleSheet(dialog_title_style())
+            btn_row = QHBoxLayout()
+            btn_row.addStretch()
 
-        text_label = QLabel(self._text)
-        text_label.setStyleSheet(dialog_body_style())
-        text_label.setWordWrap(True)
+            for key, (label, style_type) in self._buttons.items():
+                btn = QPushButton(label)
+                btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                if style_type == 'primary':
+                    btn.setStyleSheet(button_primary("padding: 8px 28px; border-radius: 10px; min-width: 80px;"))
+                else:
+                    btn.setStyleSheet(button_secondary("padding: 8px 28px; border-radius: 10px; min-width: 80px;"))
+                btn.clicked.connect(lambda checked, k=key: self._on_button(k))
+                btn_row.addWidget(btn)
+                btn_row.addSpacing(DIALOG.BUTTON_SPACING)
 
-        content_row = QHBoxLayout()
-        content_row.setSpacing(DIALOG.CONTENT_SPACING)
-        content_row.addWidget(icon_label, 0, Qt.AlignmentFlag.AlignTop)
-        content_row.addLayout(self._build_text_column(title_label, text_label), 1)
+            layout.addLayout(content_row)
+            layout.addSpacing(8)
+            layout.addLayout(btn_row)
 
-        btn_row = QHBoxLayout()
-        btn_row.addStretch()
+        self._create_shadow_frame(build_content)
 
-        for key, (label, style_type) in self._buttons.items():
-            btn = QPushButton(label)
-            btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            if style_type == 'primary':
-                btn.setStyleSheet(button_primary("padding: 8px 28px; border-radius: 10px; min-width: 80px;"))
-            else:
-                btn.setStyleSheet(button_secondary("padding: 8px 28px; border-radius: 10px; min-width: 80px;"))
-            btn.clicked.connect(lambda checked, k=key: self._on_button(k))
-            btn_row.addWidget(btn)
-            btn_row.addSpacing(DIALOG.BUTTON_SPACING)
-
-        layout.addLayout(content_row)
-        layout.addSpacing(8)
-        layout.addLayout(btn_row)
-
-        outer.addWidget(shadow_frame)
-
-    def _build_text_column(self, title_label, text_label):
+    def _build_text_column(self, text_label):
         col = QVBoxLayout()
         col.setSpacing(6)
-        col.addWidget(title_label)
         col.addWidget(text_label)
         col.addStretch()
         return col
@@ -857,6 +839,327 @@ class ScanProgressDialog(QWidget):
             self.scan_cancelled.emit()
 
 
+class ElidedPathLabel(QLabel):
+    def __init__(self, path: str, parent=None):
+        super().__init__(parent)
+        self._full_path = path
+        self._update_display()
+        self.setToolTip(path)
+
+    def _update_display(self):
+        path = self._full_path.rstrip(os.sep)
+        name = os.path.basename(path) or path
+        parent_part = path[:len(path) - len(name)] if name != path else ""
+        if parent_part and name != path:
+            self.setText(f"{parent_part}<b>{name}</b>")
+        else:
+            self.setText(f"<b>{name}</b>")
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._update_elided()
+
+    def _update_elided(self):
+        fm = self.fontMetrics()
+        available = self.width()
+        path = self._full_path.rstrip(os.sep)
+        name = os.path.basename(path) or path
+        parent_part = path[:len(path) - len(name)] if name != path else ""
+        full_text = f"{parent_part}{name}"
+        elided = fm.elidedText(full_text, Qt.TextElideMode.ElideMiddle, available)
+        if elided.endswith('…') or elided != full_text:
+            super().setText(elided)
+        else:
+            if parent_part and name != path:
+                super().setText(f"{parent_part}<b>{name}</b>")
+            else:
+                super().setText(f"<b>{name}</b>")
+
+    def minimumSizeHint(self):
+        return QSize(0, super().minimumSizeHint().height())
+
+    def sizeHint(self):
+        return QSize(0, super().minimumSizeHint().height())
+
+
+class AnimatedRadioButton(QRadioButton):
+    _INDICATOR_MARGIN = 3
+
+    def __init__(self, text="", parent=None, font_pt=None):
+        super().__init__(text, parent)
+        self._check_opacity = 0.0
+        self._hovered = False
+        self._font_pt = font_pt or FONT.CAPTION_PT
+        self._anim = QPropertyAnimation(self, b"check_opacity")
+        self._anim.setDuration(150)
+        self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self.toggled.connect(self._on_toggled)
+
+    def _on_toggled(self, checked):
+        self._anim.stop()
+        self._anim.setStartValue(self._check_opacity)
+        self._anim.setEndValue(1.0 if checked else 0.0)
+        self._anim.start()
+
+    def get_check_opacity(self):
+        return self._check_opacity
+
+    def set_check_opacity(self, opacity):
+        self._check_opacity = opacity
+        self.update()
+
+    check_opacity = Property(float, get_check_opacity, set_check_opacity)
+
+    def enterEvent(self, event):
+        self._hovered = True
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self._hovered = False
+        self.update()
+        super().leaveEvent(event)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        m = self._INDICATOR_MARGIN
+        indicator_size = 14
+        indicator_y = (self.height() - indicator_size) / 2
+        indicator_rect = QRectF(m, indicator_y, indicator_size, indicator_size)
+        center = indicator_rect.center()
+        outer_radius = indicator_size / 2
+
+        if self.isEnabled():
+            if self.isChecked():
+                border_color = QColor(COLORS.BRAND)
+                border_color.setAlphaF(max(0.3, self._check_opacity))
+                if self._hovered:
+                    border_color = QColor(COLORS.BRAND_HOVER)
+                    border_color.setAlphaF(max(0.5, self._check_opacity))
+                painter.setPen(QPen(border_color, 2))
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.drawEllipse(center, outer_radius, outer_radius)
+
+                inner_radius = outer_radius * 0.4
+                dot_color = QColor(COLORS.BRAND_HOVER if self._hovered else COLORS.BRAND)
+                dot_color.setAlphaF(self._check_opacity)
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(dot_color)
+                painter.drawEllipse(center, inner_radius, inner_radius)
+            else:
+                hover_border = QColor(COLORS.BRAND) if self._hovered else QColor(COLORS.BORDER_HOVER)
+                painter.setPen(QPen(hover_border, 2))
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.drawEllipse(center, outer_radius, outer_radius)
+        else:
+            if self.isChecked():
+                painter.setPen(QPen(QColor(COLORS.BORDER_HOVER), 2))
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.drawEllipse(center, outer_radius, outer_radius)
+
+                inner_radius = outer_radius * 0.4
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(QColor(COLORS.BORDER_HOVER))
+                painter.drawEllipse(center, inner_radius, inner_radius)
+            else:
+                painter.setPen(QPen(QColor(COLORS.BORDER_DEFAULT), 2))
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.drawEllipse(center, outer_radius, outer_radius)
+
+        text_x = m + indicator_size + 6
+        text_color = QColor(COLORS.TEXT_SECONDARY if self.isEnabled() else COLORS.TEXT_PLACEHOLDER)
+        if self._hovered and self.isEnabled():
+            text_color = QColor(COLORS.TEXT_PRIMARY)
+        painter.setPen(text_color)
+        font = QFont()
+        font.setPointSize(self._font_pt)
+        painter.setFont(font)
+        fm = QFontMetrics(font)
+        text_rect = QRectF(text_x, 0, fm.horizontalAdvance(self.text()) + 4, self.height())
+        painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, self.text())
+        painter.end()
+
+    def minimumSizeHint(self):
+        font = QFont()
+        font.setPointSize(self._font_pt)
+        fm = QFontMetrics(font)
+        text_width = fm.horizontalAdvance(self.text())
+        return QSize(self._INDICATOR_MARGIN + 14 + 6 + text_width + 4, 26)
+
+    def sizeHint(self):
+        return self.minimumSizeHint()
+
+
+class CollapsibleSection(QWidget):
+    def __init__(self, title: str, default_expanded: bool = True, parent=None):
+        super().__init__(parent)
+        self._expanded = default_expanded
+        self._title = title
+        self._content_widget = None
+        self._toggle_btn = None
+        self._header_widget = None
+        self._animation = None
+        self._content_height = 0
+        self._init_header()
+
+    def _init_header(self):
+        self._main_layout = QVBoxLayout()
+        self._main_layout.setContentsMargins(0, 0, 0, 0)
+        self._main_layout.setSpacing(0)
+
+        self._header_widget = QWidget()
+        self._header_widget.setObjectName("sectionHeader")
+        self._header_widget.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._header_widget.setStyleSheet(f"""
+            QWidget#sectionHeader {{
+                background-color: {COLORS.BG_PRIMARY};
+                border-radius: {RADIUS.DEFAULT}px;
+                border: none;
+            }}
+            QWidget#sectionHeader:hover {{
+                background-color: {COLORS.BG_HOVER};
+            }}
+        """)
+        header_row = QHBoxLayout(self._header_widget)
+        header_row.setContentsMargins(10, 6, 10, 6)
+        header_row.setSpacing(6)
+
+        self._toggle_btn = QPushButton()
+        self._toggle_btn.setFixedSize(16, 16)
+        self._toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._toggle_btn.setStyleSheet(f"""
+            QPushButton {{
+                border: none;
+                background: transparent;
+                outline: none;
+                border-radius: {RADIUS.SMALL}px;
+            }}
+            QPushButton:hover {{
+                background-color: {COLORS.BG_HOVER};
+            }}
+        """)
+        self._toggle_btn.clicked.connect(self._toggle)
+        self._update_toggle_icon()
+
+        title_label = QLabel(self._title)
+        title_font = QFont()
+        title_font.setPointSize(FONT.BODY_PT)
+        title_font.setBold(True)
+        title_label.setFont(title_font)
+        title_label.setStyleSheet(f"color: {COLORS.TEXT_PRIMARY}; border: none; background: transparent;")
+
+        header_row.addWidget(self._toggle_btn)
+        header_row.addWidget(title_label)
+        header_row.addStretch()
+
+        self._header_widget.mousePressEvent = lambda e: self._toggle() if e.button() == Qt.MouseButton.LeftButton else None
+
+        self._main_layout.addWidget(self._header_widget)
+        self.setLayout(self._main_layout)
+
+    def _update_toggle_icon(self):
+        painter = QPainter()
+        dpr = self.devicePixelRatio() if hasattr(self, 'devicePixelRatio') else 1.0
+        pixmap = QPixmap(int(16 * dpr), int(16 * dpr))
+        pixmap.setDevicePixelRatio(dpr)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        painter.begin(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pen = QPen(QColor(COLORS.BRAND), 2)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(pen)
+        cx, cy = 8, 8
+        if self._expanded:
+            painter.drawLine(4, 6, 8, 10)
+            painter.drawLine(8, 10, 12, 6)
+        else:
+            painter.drawLine(6, 4, 10, 8)
+            painter.drawLine(10, 8, 6, 12)
+        painter.end()
+        self._toggle_btn.setIcon(QIcon(pixmap))
+
+    def _toggle(self):
+        self._expanded = not self._expanded
+        self._update_toggle_icon()
+        if self._content_widget:
+            if self._animation:
+                self._animation.stop()
+                self._animation = None
+            if self._expanded:
+                self._content_widget.setVisible(True)
+                content_height = self._content_widget.sizeHint().height()
+                self._content_widget.setMaximumHeight(0)
+                self._animation = QPropertyAnimation(self._content_widget, b"maximumHeight")
+                self._animation.setDuration(200)
+                self._animation.setStartValue(0)
+                self._animation.setEndValue(content_height)
+                self._animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+                self._animation.finished.connect(self._on_expand_finished)
+                self._animation.start()
+            else:
+                current_height = self._content_widget.height()
+                self._animation = QPropertyAnimation(self._content_widget, b"maximumHeight")
+                self._animation.setDuration(200)
+                self._animation.setStartValue(current_height)
+                self._animation.setEndValue(0)
+                self._animation.setEasingCurve(QEasingCurve.Type.InCubic)
+                self._animation.finished.connect(self._on_collapse_finished)
+                self._animation.start()
+
+    def _on_expand_finished(self):
+        if self._content_widget:
+            self._content_widget.setMaximumHeight(16777215)
+
+    def _on_collapse_finished(self):
+        if self._content_widget and not self._expanded:
+            self._content_widget.setVisible(False)
+            self._content_widget.setMaximumHeight(0)
+
+    def set_content(self, widget: QWidget):
+        self._content_widget = widget
+        self._content_widget.setVisible(self._expanded)
+        if not self._expanded:
+            self._content_widget.setMaximumHeight(0)
+        self._main_layout.addWidget(self._content_widget)
+
+
+class HoverInfoIcon(QLabel):
+    def __init__(self, tooltip_text: str, parent=None):
+        super().__init__(parent)
+        self._tooltip_text = tooltip_text
+        self.setFixedSize(16, 16)
+        self.setCursor(Qt.CursorShape.WhatsThisCursor)
+        self.setToolTip(tooltip_text)
+        self._hovered = False
+
+    def enterEvent(self, event):
+        self._hovered = True
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self._hovered = False
+        self.update()
+        super().leaveEvent(event)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        bg_color = QColor(COLORS.BRAND) if self._hovered else QColor(COLORS.BORDER_HOVER)
+        painter.setBrush(bg_color)
+        painter.drawEllipse(0, 0, 16, 16)
+        painter.setPen(QColor(COLORS.BG_PRIMARY))
+        font = QFont()
+        font.setPointSize(10)
+        font.setBold(True)
+        painter.setFont(font)
+        painter.drawText(QRectF(0, 0, 16, 16), Qt.AlignmentFlag.AlignCenter, "!")
+        painter.end()
+
+
 class InfoIconLabel(QLabel):
     def __init__(self, tooltip_text: str, parent=None):
         super().__init__(parent)
@@ -907,62 +1210,60 @@ class SearchScopePanel(QWidget):
 
     def _init_ui(self):
         self._main_layout = QVBoxLayout()
-        self._main_layout.setContentsMargins(0, 0, 0, 0)
-        self._main_layout.setSpacing(0)
+        self._main_layout.setContentsMargins(12, 8, 12, 8)
+        self._main_layout.setSpacing(4)
 
-        content_splitter = QSplitter(Qt.Orientation.Horizontal)
-        content_splitter.setHandleWidth(2)
-        content_splitter.setStyleSheet(splitter_style())
+        self._scope_collapsible = CollapsibleSection("指定搜索范围", default_expanded=True)
+        scope_content = QWidget()
+        scope_content.setStyleSheet(f"QWidget {{ background-color: {COLORS.BG_PRIMARY}; border-radius: {RADIUS.DEFAULT}px; }}")
+        scope_content_layout = QVBoxLayout()
+        scope_content_layout.setContentsMargins(10, 6, 10, 6)
+        scope_content_layout.setSpacing(4)
 
-        left_panel = QWidget()
-        left_layout = QVBoxLayout()
-        left_layout.setContentsMargins(20, 8, 12, 8)
-        left_layout.setSpacing(4)
-
-        scope_header_row = QHBoxLayout()
-        scope_header_row.setSpacing(8)
-        scope_header = QLabel("指定搜索范围")
-        scope_header.setStyleSheet(label_header_style())
         self._scope_detail = QLabel("")
         self._scope_detail.setStyleSheet(label_micro_style())
-        scope_header_row.addWidget(scope_header)
-        scope_header_row.addWidget(self._scope_detail)
-        scope_header_row.addStretch()
-        left_layout.addLayout(scope_header_row)
+        scope_content_layout.addWidget(self._scope_detail)
 
         radio_row = QHBoxLayout()
         radio_row.setSpacing(12)
 
         self._scope_radio_group = QButtonGroup(self)
-        self._all_radio = QRadioButton("全部已扫描目录")
+        self._all_radio = AnimatedRadioButton("全部已扫描目录", font_pt=FONT.MICRO_PT)
         self._all_radio.setChecked(True)
         self._all_radio.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._all_radio.setStyleSheet(radio_button_style())
         self._scope_radio_group.addButton(self._all_radio)
 
-        self._custom_radio = QRadioButton("自定义搜索范围")
+        self._custom_radio = AnimatedRadioButton("自定义搜索范围", font_pt=FONT.MICRO_PT)
         self._custom_radio.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._custom_radio.setStyleSheet(self._all_radio.styleSheet())
         self._scope_radio_group.addButton(self._custom_radio)
 
+        from .widgets.filter_bar import _make_colored_icon
+        custom_settings_icon = _make_colored_icon("icons/settings.svg", COLORS.TEXT_SECONDARY, 16)
         self._custom_settings_btn = QPushButton()
-        self._custom_settings_btn.setIcon(QIcon("icons/settings.svg"))
+        self._custom_settings_btn.setIcon(custom_settings_icon)
         self._custom_settings_btn.setIconSize(QSize(14, 14))
         self._custom_settings_btn.setFixedSize(28, 28)
         self._custom_settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._custom_settings_btn.setStyleSheet(icon_button_style())
-        self._custom_settings_btn.clicked.connect(self._on_custom_clicked)
+        self._custom_settings_btn.setStyleSheet(f"""
+            QPushButton {{
+                border: {BTN.BORDER_WIDTH} {BTN.BORDER_STYLE} {COLORS.BORDER_DEFAULT};
+                border-radius: {RADIUS.MEDIUM}px;
+                background-color: transparent;
+                outline: none;
+            }}
+            QPushButton:hover {{
+                background-color: {COLORS.BG_HOVER};
+                border-color: {COLORS.BORDER_HOVER};
+            }}
+        """)
+        self._custom_settings_btn.clicked.connect(self._on_custom_settings_clicked)
         self._custom_settings_btn.setVisible(False)
-
-        self._custom_info_icon = InfoIconLabel("点击下方标签可通过结果所在目录快捷筛选")
-        self._custom_info_icon.setVisible(False)
 
         radio_row.addWidget(self._all_radio)
         radio_row.addWidget(self._custom_radio)
         radio_row.addWidget(self._custom_settings_btn)
-        radio_row.addWidget(self._custom_info_icon)
         radio_row.addStretch()
-        left_layout.addLayout(radio_row)
+        scope_content_layout.addLayout(radio_row)
 
         self._scope_radio_group.buttonClicked.connect(self._on_scope_radio_clicked)
 
@@ -979,29 +1280,52 @@ class SearchScopePanel(QWidget):
         self._scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self._scroll.setMinimumHeight(32)
         self._scroll.setMaximumHeight(80)
-        self._scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }" + scrollbar_style())
+        self._scroll.setStyleSheet(f"QScrollArea {{ border: none; background-color: {COLORS.BG_SECONDARY}; border-radius: {RADIUS.SMALL}px; }}" + scrollbar_style())
         self._scroll.setVisible(False)
 
-        left_layout.addWidget(self._scroll)
-        left_layout.addStretch()
-        left_panel.setLayout(left_layout)
-        left_panel.setStyleSheet("QWidget { background: transparent; }")
+        scope_content_layout.addWidget(self._scroll)
+        scope_content.setLayout(scope_content_layout)
+        self._scope_collapsible.set_content(scope_content)
 
-        right_panel = QWidget()
-        right_layout = QVBoxLayout()
-        right_layout.setContentsMargins(12, 8, 20, 8)
-        right_layout.setSpacing(4)
+        self._main_layout.addWidget(self._scope_collapsible)
 
-        manage_header = QLabel("管理扫描路径")
-        manage_header.setStyleSheet(label_header_style())
+        self._manage_collapsible = CollapsibleSection("管理扫描路径", default_expanded=True)
+        manage_content = QWidget()
+        manage_content.setStyleSheet(f"QWidget {{ background-color: {COLORS.BG_PRIMARY}; border-radius: {RADIUS.DEFAULT}px; }}")
+        manage_content_layout = QVBoxLayout()
+        manage_content_layout.setContentsMargins(10, 6, 10, 6)
+        manage_content_layout.setSpacing(4)
+
+        self._scope_status_widget = QWidget()
+        self._scope_status_widget.setStyleSheet("QWidget { background: transparent; }")
+        self._scope_status_layout = QHBoxLayout(self._scope_status_widget)
+        self._scope_status_layout.setContentsMargins(0, 0, 0, 4)
+        self._scope_status_layout.setSpacing(4)
+
+        self._status_dot = QLabel()
+        self._status_dot.setFixedSize(8, 8)
+        self._status_dot.setStyleSheet(f"""
+            QLabel {{
+                border-radius: 4px;
+                background-color: {COLORS.ERROR};
+                border: none;
+            }}
+        """)
+        self._scope_status_layout.addWidget(self._status_dot, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        self._status_label = QLabel("0 个目录 · 未扫描")
+        self._status_label.setStyleSheet(label_micro_style())
+        self._scope_status_layout.addWidget(self._status_label, 1, Qt.AlignmentFlag.AlignVCenter)
+
+        manage_content_layout.addWidget(self._scope_status_widget)
 
         self._scope_info_scroll = QScrollArea()
         self._scope_info_scroll.setWidgetResizable(True)
         self._scope_info_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._scope_info_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self._scope_info_scroll.setMinimumHeight(40)
-        self._scope_info_scroll.setMaximumHeight(100)
-        self._scope_info_scroll.setStyleSheet(scope_info_scroll_style())
+        self._scope_info_scroll.setMaximumHeight(120)
+        self._scope_info_scroll.setStyleSheet(f"QScrollArea {{ border: none; background-color: {COLORS.BG_SECONDARY}; border-radius: {RADIUS.SMALL}px; }}" + scrollbar_style())
         self._scope_info_container = QWidget()
         self._scope_info_layout = QVBoxLayout(self._scope_info_container)
         self._scope_info_layout.setContentsMargins(8, 4, 8, 4)
@@ -1014,7 +1338,7 @@ class SearchScopePanel(QWidget):
         action_row.setSpacing(8)
 
         from .widgets.filter_bar import _make_colored_icon
-        gray_settings = _make_colored_icon("icons/settings.svg", COLORS.TEXT_TERTIARY, 16)
+        gray_settings = _make_colored_icon("icons/settings.svg", COLORS.TEXT_SECONDARY, 16)
         self.configure_btn = QPushButton("  管理扫描路径")
         self.configure_btn.setIcon(gray_settings)
         self.configure_btn.setIconSize(QSize(14, 14))
@@ -1039,27 +1363,18 @@ class SearchScopePanel(QWidget):
         action_row.addWidget(self.configure_btn, 0, Qt.AlignmentFlag.AlignVCenter)
         action_row.addWidget(self.scan_btn, 0, Qt.AlignmentFlag.AlignVCenter)
 
-        right_layout.addWidget(manage_header)
-        right_layout.addWidget(self._scope_info_scroll, 1)
-        right_layout.addLayout(action_row)
+        manage_content_layout.addWidget(self._scope_info_scroll, 1)
+        manage_content_layout.addLayout(action_row)
+        manage_content.setLayout(manage_content_layout)
+        self._manage_collapsible.set_content(manage_content)
 
-        right_panel.setLayout(right_layout)
-        right_panel.setStyleSheet("QWidget { background: transparent; }")
-
-        content_splitter.addWidget(left_panel)
-        content_splitter.addWidget(right_panel)
-        content_splitter.setStretchFactor(0, 2)
-        content_splitter.setStretchFactor(1, 1)
-        content_splitter.setSizes([400, 200])
-
-        self._main_layout.addWidget(content_splitter)
+        self._main_layout.addWidget(self._manage_collapsible)
         self._main_layout.addWidget(self.progress_bar)
 
         self.setLayout(self._main_layout)
         self.setStyleSheet(f"""
             QWidget {{
-                background-color: {COLORS.BG_TERTIARY};
-                border-bottom: 1px solid {COLORS.BORDER_DEFAULT};
+                background-color: {COLORS.BG_SECONDARY};
             }}
         """)
 
@@ -1098,6 +1413,15 @@ class SearchScopePanel(QWidget):
 
         dir_count = len(self._scanned_dirs)
         if dir_count == 0:
+            self._status_dot.setStyleSheet(f"""
+                QLabel {{
+                    border-radius: 4px;
+                    background-color: {COLORS.ERROR};
+                    border: none;
+                }}
+            """)
+            self._status_label.setText("0 个目录 · 未扫描")
+            self._status_label.setStyleSheet(label_micro_style())
             return
 
         incomplete_count = 0
@@ -1106,10 +1430,6 @@ class SearchScopePanel(QWidget):
             if status is None or status in (SCAN_STATUS_INCOMPLETE, SCAN_STATUS_FAILED, SCAN_STATUS_SCANNING):
                 incomplete_count += 1
 
-        header_row = QHBoxLayout()
-        header_row.setSpacing(4)
-
-        status_dot = QLabel()
         if self._indexed_count == 0:
             dot_color = COLORS.ERROR
             dot_tip = "未扫描"
@@ -1119,38 +1439,29 @@ class SearchScopePanel(QWidget):
         else:
             dot_color = COLORS.SUCCESS
             dot_tip = "已扫描"
-        status_dot.setStyleSheet(f"""
+        self._status_dot.setStyleSheet(f"""
             QLabel {{
-                min-width: 8px; max-width: 8px;
-                min-height: 8px; max-height: 8px;
                 border-radius: 4px;
                 background-color: {dot_color};
                 border: none;
             }}
         """)
-        status_dot.setToolTip(dot_tip)
-        header_row.addWidget(status_dot, 0, Qt.AlignmentFlag.AlignVCenter)
+        self._status_dot.setToolTip(dot_tip)
 
         status_text = ""
         if incomplete_count > 0:
-            status_text = f" · ⚠ {incomplete_count} 个目录未完成扫描"
+            status_text = f" · {incomplete_count} 个目录未完成扫描"
 
-        header_label = QLabel(f"{dir_count} 个目录" + (f" · 已索引 {self._indexed_count:,} 个文件" if self._indexed_count > 0 else " · 未扫描") + status_text)
-        header_label.setStyleSheet(f"font-size: {BTN.TAG_FONT_SIZE}; color: {COLORS.TEXT_PLACEHOLDER}; border: none; background: transparent; padding: 0px; margin: 0px;")
+        header_text = f"{dir_count} 个目录" + (f" · 已索引 {self._indexed_count:,} 个文件" if self._indexed_count > 0 else " · 未扫描") + status_text
+        self._status_label.setText(header_text)
         if incomplete_count > 0:
-            header_label.setStyleSheet(f"font-size: {BTN.TAG_FONT_SIZE}; color: {COLORS.WARNING}; border: none; background: transparent; padding: 0px; margin: 0px;")
-        header_row.addWidget(header_label, 1)
-
-        header_widget = QWidget()
-        header_widget.setLayout(header_row)
-        header_widget.setStyleSheet("QWidget { background: transparent; }")
-        self._scope_info_layout.addWidget(header_widget)
+            self._status_label.setStyleSheet(f"font-size: {BTN.TAG_FONT_SIZE}; color: {COLORS.WARNING}; border: none; background: transparent;")
+        else:
+            self._status_label.setStyleSheet(label_micro_style())
 
         for d in self._scanned_dirs:
-            name = os.path.basename(d.rstrip(os.sep)) or d
             status = get_scan_status(d)
-            dir_label = QLabel(name)
-            dir_label.setToolTip(d)
+            dir_label = ElidedPathLabel(d)
             if status is None:
                 dir_label.setStyleSheet(f"font-size: {BTN.TAG_FONT_SIZE}; color: {COLORS.WARNING}; border: none; background: transparent; padding: 1px 2px; margin: 0px;")
                 dir_label.setToolTip(f"{d} (未扫描)")
@@ -1162,6 +1473,7 @@ class SearchScopePanel(QWidget):
                 dir_label.setToolTip(f"{d} (扫描失败)")
             else:
                 dir_label.setStyleSheet(f"font-size: {BTN.TAG_FONT_SIZE}; color: {COLORS.TEXT_SECONDARY}; border: none; background: transparent; padding: 1px 2px; margin: 0px;")
+                dir_label.setToolTip(d)
             self._scope_info_layout.addWidget(dir_label)
 
     def _update_scope_detail(self):
@@ -1196,7 +1508,7 @@ class SearchScopePanel(QWidget):
         if btn == self._all_radio:
             self._on_all_clicked()
         elif btn == self._custom_radio:
-            self._on_custom_clicked()
+            self._on_custom_radio_selected()
 
     def _on_all_clicked(self):
         self._scope_mode = 'all'
@@ -1206,12 +1518,24 @@ class SearchScopePanel(QWidget):
         self._custom_dir_list = []
         self._scroll.setVisible(False)
         self._custom_settings_btn.setVisible(False)
-        self._custom_info_icon.setVisible(False)
         self._rebuild_dir_buttons()
         self._update_scope_detail()
         self.scope_changed.emit(list(self._selected_dirs))
 
-    def _on_custom_clicked(self):
+    def _on_custom_radio_selected(self):
+        self._scope_mode = 'custom'
+        self._all_radio.setChecked(False)
+        self._custom_radio.setChecked(True)
+        if not self._custom_dir_list:
+            self._custom_dir_list = list(self._scanned_dirs)
+            self._selected_dirs = set(self._scanned_dirs)
+        self._scroll.setVisible(True)
+        self._custom_settings_btn.setVisible(True)
+        self._rebuild_dir_buttons()
+        self._update_scope_detail()
+        self.scope_changed.emit(list(self._selected_dirs))
+
+    def _on_custom_settings_clicked(self):
         self._all_radio.setChecked(False)
         self._custom_radio.setChecked(True)
 
@@ -1254,10 +1578,15 @@ class SearchScopePanel(QWidget):
 
             self._scope_mode = 'custom'
             self._selected_dirs = set(selected)
+            if not self._selected_dirs:
+                _styled_msg_box(
+                    self, QMessageBox.Icon.Warning,
+                    "搜索范围为空",
+                    "未选择任何目录作为搜索范围，搜索将不会返回结果。\n建议至少选择一个目录。"
+                )
             self._custom_dir_list = list(selected)
             self._scroll.setVisible(True)
             self._custom_settings_btn.setVisible(True)
-            self._custom_info_icon.setVisible(True)
             self._rebuild_dir_buttons()
             self._update_scope_detail()
             self.scope_changed.emit(list(self._selected_dirs))
@@ -1269,7 +1598,6 @@ class SearchScopePanel(QWidget):
                 self._all_radio.setChecked(False)
                 self._custom_radio.setChecked(True)
                 self._custom_settings_btn.setVisible(True)
-                self._custom_info_icon.setVisible(True)
 
     def _on_dir_toggled(self, path: str, checked: bool):
         if checked:
@@ -1371,9 +1699,22 @@ class SearchScopePanel(QWidget):
         if self._is_scanning:
             return
 
-        from .widgets.filter_bar import ScanConfirmDialog
-        dialog = ScanConfirmDialog(self)
-        if dialog.exec() != QDialog.DialogCode.Accepted:
+        if self._indexed_count == 0:
+            title = "开始扫描"
+            text = "将扫描所选目录/驱动器以建立文件索引，这可能需要几分钟时间。\n确定要开始扫描吗？"
+        elif self._has_unscanned_dirs():
+            title = "新增扫描"
+            text = "发现新增的未扫描目录，需要扫描以建立文件索引。\n确定要开始新增扫描吗？"
+        else:
+            title = "重新扫描"
+            text = "将重新扫描所有目录/驱动器，更新文件索引。\n这可能需要几分钟时间，确定要继续吗？"
+
+        reply = _styled_msg_box(
+            self, QMessageBox.Icon.Question,
+            title, text,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply != QMessageBox.StandardButton.Yes:
             return
 
         self._is_scanning = True
@@ -1431,7 +1772,6 @@ class SearchScopePanel(QWidget):
         self._custom_radio.setChecked(False)
         self._scroll.setVisible(False)
         self._custom_settings_btn.setVisible(False)
-        self._custom_info_icon.setVisible(False)
         self._rebuild_dir_buttons()
         self._update_scope_detail()
         self._update_scope_info()
@@ -1439,147 +1779,133 @@ class SearchScopePanel(QWidget):
         self._update_scan_btn_state()
 
 
-class _ScopeSelectionDialog(QDialog):
+class _ScopeSelectionDialog(ModernDialogBase):
     _PLACEHOLDER_KEY = "__placeholder__"
 
     def __init__(self, scanned_dirs: list, current_selected: set, parent=None):
-        super().__init__(parent)
+        super().__init__(parent, title="自定义搜索范围", min_width=560, min_height=540, resizable=True)
         self._scanned_dirs = list(scanned_dirs)
         self._selected_dirs = set(current_selected)
         self._unscanned_dirs = []
         self._updating_tree = False
         self._loaded_items = set()
-        self.setWindowTitle("自定义搜索范围")
-        self.setMinimumSize(560, 540)
-        self.setStyleSheet(f"QDialog {{ background-color: {COLORS.BG_PRIMARY}; }}")
         self._init_ui()
 
     def _init_ui(self):
-        layout = QVBoxLayout()
-        layout.setSpacing(12)
-        layout.setContentsMargins(24, 24, 24, 20)
+        def build_content(content_widget):
+            layout = QVBoxLayout(content_widget)
+            layout.setSpacing(12)
+            layout.setContentsMargins(24, 4, 24, 20)
 
-        header_row = QHBoxLayout()
-        header_row.setSpacing(10)
-        header_icon = QLabel()
-        header_icon.setPixmap(QIcon("icons/search.svg").pixmap(QSize(22, 22)))
-        header_icon.setStyleSheet("border: none; background: transparent;")
-        header_text = QLabel("自定义搜索范围")
-        header_text.setStyleSheet(dialog_title_style() + f"font-size: {FONT.DISPLAY_PT}px;")
-        header_row.addWidget(header_icon)
-        header_row.addWidget(header_text)
-        header_row.addStretch()
+            desc = QLabel("FileFinder将在指定的搜索范围中进行搜索")
+            desc.setStyleSheet(label_caption_style())
+            desc.setWordWrap(True)
 
-        desc = QLabel("FileFinder将在指定的搜索范围中进行搜索")
-        desc.setStyleSheet(label_caption_style())
-        desc.setWordWrap(True)
+            select_row = QHBoxLayout()
+            select_row.setSpacing(6)
 
-        select_row = QHBoxLayout()
-        select_row.setSpacing(6)
+            select_all_btn = QPushButton("全选")
+            select_all_btn.setStyleSheet(button_small_secondary())
+            select_all_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            select_all_btn.clicked.connect(self._on_select_all)
 
-        select_all_btn = QPushButton("全选")
-        select_all_btn.setStyleSheet(button_small_secondary())
-        select_all_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        select_all_btn.clicked.connect(self._on_select_all)
+            deselect_all_btn = QPushButton("全不选")
+            deselect_all_btn.setStyleSheet(button_small_secondary())
+            deselect_all_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            deselect_all_btn.clicked.connect(self._on_deselect_all)
 
-        deselect_all_btn = QPushButton("全不选")
-        deselect_all_btn.setStyleSheet(button_small_secondary())
-        deselect_all_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        deselect_all_btn.clicked.connect(self._on_deselect_all)
+            sep = QFrame()
+            sep.setFrameShape(QFrame.Shape.VLine)
+            sep.setStyleSheet(f"color: {COLORS.BORDER_DEFAULT}; border: none; background: transparent;")
 
-        sep = QFrame()
-        sep.setFrameShape(QFrame.Shape.VLine)
-        sep.setStyleSheet(f"color: {COLORS.BORDER_DEFAULT}; border: none; background: transparent;")
+            expand_all_btn = QPushButton("全部展开")
+            expand_all_btn.setStyleSheet(button_small_secondary())
+            expand_all_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            expand_all_btn.clicked.connect(self._on_expand_all)
 
-        expand_all_btn = QPushButton("全部展开")
-        expand_all_btn.setStyleSheet(button_small_secondary())
-        expand_all_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        expand_all_btn.clicked.connect(self._on_expand_all)
+            collapse_all_btn = QPushButton("全部折叠")
+            collapse_all_btn.setStyleSheet(button_small_secondary())
+            collapse_all_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            collapse_all_btn.clicked.connect(self._on_collapse_all)
 
-        collapse_all_btn = QPushButton("全部折叠")
-        collapse_all_btn.setStyleSheet(button_small_secondary())
-        collapse_all_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        collapse_all_btn.clicked.connect(self._on_collapse_all)
+            self._count_label = QLabel("")
+            self._count_label.setStyleSheet(label_micro_style())
 
-        self._count_label = QLabel("")
-        self._count_label.setStyleSheet(label_micro_style())
+            select_row.addWidget(select_all_btn)
+            select_row.addWidget(deselect_all_btn)
+            select_row.addWidget(sep)
+            select_row.addWidget(expand_all_btn)
+            select_row.addWidget(collapse_all_btn)
+            select_row.addStretch()
+            select_row.addWidget(self._count_label)
 
-        select_row.addWidget(select_all_btn)
-        select_row.addWidget(deselect_all_btn)
-        select_row.addWidget(sep)
-        select_row.addWidget(expand_all_btn)
-        select_row.addWidget(collapse_all_btn)
-        select_row.addStretch()
-        select_row.addWidget(self._count_label)
+            self._tree = QTreeWidget()
+            self._tree.setHeaderLabel("选择目录")
+            self._tree.setAnimated(True)
+            self._tree.setIndentation(16)
+            self._tree.setExpandsOnDoubleClick(True)
 
-        self._tree = QTreeWidget()
-        self._tree.setHeaderLabel("选择目录")
-        self._tree.setAnimated(True)
-        self._tree.setIndentation(16)
-        self._tree.setExpandsOnDoubleClick(True)
+            icons_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'icons')
+            checkmark_path = os.path.join(icons_dir, 'checkmark.svg').replace('\\', '/')
+            partial_path = os.path.join(icons_dir, 'partial-check.svg').replace('\\', '/')
+            branch_closed_path = os.path.join(icons_dir, 'branch-closed.svg').replace('\\', '/')
+            branch_open_path = os.path.join(icons_dir, 'branch-open.svg').replace('\\', '/')
 
-        icons_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'icons')
-        checkmark_path = os.path.join(icons_dir, 'checkmark.svg').replace('\\', '/')
-        partial_path = os.path.join(icons_dir, 'partial-check.svg').replace('\\', '/')
-        branch_closed_path = os.path.join(icons_dir, 'branch-closed.svg').replace('\\', '/')
-        branch_open_path = os.path.join(icons_dir, 'branch-open.svg').replace('\\', '/')
+            tree_style = tree_widget_style(checkmark_path, partial_path, branch_closed_path, branch_open_path)
+            self._tree.setStyleSheet(tree_style)
+            self._tree.header().setStretchLastSection(True)
+            self._tree.itemChanged.connect(self._on_tree_item_changed)
+            self._tree.itemExpanded.connect(self._on_item_expanded)
+            self._populate_tree()
 
-        tree_style = tree_widget_style(checkmark_path, partial_path, branch_closed_path, branch_open_path)
-        self._tree.setStyleSheet(tree_style)
-        self._tree.header().setStretchLastSection(True)
-        self._tree.itemChanged.connect(self._on_tree_item_changed)
-        self._tree.itemExpanded.connect(self._on_item_expanded)
-        self._populate_tree()
+            browse_row = QHBoxLayout()
+            browse_row.setSpacing(8)
 
-        browse_row = QHBoxLayout()
-        browse_row.setSpacing(8)
+            self._path_input = QLineEdit()
+            self._path_input.setPlaceholderText("输入目标路径，如 D:\\Projects 或 C:\\Users")
+            self._path_input.setFixedHeight(36)
+            self._path_input.setStyleSheet(input_style())
 
-        self._path_input = QLineEdit()
-        self._path_input.setPlaceholderText("输入目标路径，如 D:\\Projects 或 C:\\Users")
-        self._path_input.setFixedHeight(36)
-        self._path_input.setStyleSheet(input_style())
+            browse_btn = QPushButton("浏览...")
+            browse_btn.setFixedHeight(36)
+            browse_btn.setStyleSheet(button_small_secondary())
+            browse_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            browse_btn.clicked.connect(self._on_browse)
 
-        browse_btn = QPushButton("浏览...")
-        browse_btn.setFixedHeight(36)
-        browse_btn.setStyleSheet(button_small_secondary())
-        browse_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        browse_btn.clicked.connect(self._on_browse)
+            add_btn = QPushButton("+ 添加")
+            add_btn.setFixedHeight(36)
+            add_btn.setStyleSheet(button_small_primary())
+            add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            add_btn.clicked.connect(self._on_add)
 
-        add_btn = QPushButton("+ 添加")
-        add_btn.setFixedHeight(36)
-        add_btn.setStyleSheet(button_small_primary())
-        add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        add_btn.clicked.connect(self._on_add)
+            browse_row.addWidget(self._path_input, 1)
+            browse_row.addWidget(browse_btn)
+            browse_row.addWidget(add_btn)
 
-        browse_row.addWidget(self._path_input, 1)
-        browse_row.addWidget(browse_btn)
-        browse_row.addWidget(add_btn)
+            btn_row = QHBoxLayout()
+            btn_row.addStretch()
 
-        btn_row = QHBoxLayout()
-        btn_row.addStretch()
+            cancel_btn = QPushButton("取消")
+            cancel_btn.setStyleSheet(button_secondary())
+            cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            cancel_btn.clicked.connect(self.reject)
 
-        cancel_btn = QPushButton("取消")
-        cancel_btn.setStyleSheet(button_secondary())
-        cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        cancel_btn.clicked.connect(self.reject)
+            confirm_btn = QPushButton("确定")
+            confirm_btn.setStyleSheet(button_primary())
+            confirm_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            confirm_btn.clicked.connect(self._on_confirm)
 
-        confirm_btn = QPushButton("确定")
-        confirm_btn.setStyleSheet(button_primary())
-        confirm_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        confirm_btn.clicked.connect(self._on_confirm)
+            btn_row.addWidget(cancel_btn)
+            btn_row.addSpacing(8)
+            btn_row.addWidget(confirm_btn)
 
-        btn_row.addWidget(cancel_btn)
-        btn_row.addSpacing(8)
-        btn_row.addWidget(confirm_btn)
+            layout.addWidget(desc)
+            layout.addLayout(select_row)
+            layout.addWidget(self._tree, 1)
+            layout.addLayout(browse_row)
+            layout.addLayout(btn_row)
 
-        layout.addLayout(header_row)
-        layout.addWidget(desc)
-        layout.addLayout(select_row)
-        layout.addWidget(self._tree, 1)
-        layout.addLayout(browse_row)
-        layout.addLayout(btn_row)
-
-        self.setLayout(layout)
+        self._create_shadow_frame(build_content)
         self._update_count_label()
 
     def _populate_tree(self):
@@ -2081,23 +2407,24 @@ class MainWindow(QMainWindow):
         self.search_bar = SearchBar()
         layout.addWidget(self.search_bar)
 
-        self._search_scope_panel = SearchScopePanel()
-        layout.addWidget(self._search_scope_panel)
-
-        divider = QFrame()
-        divider.setFixedHeight(1)
-        divider.setStyleSheet(f"QFrame {{ background-color: {COLORS.BORDER_DEFAULT}; border: none; }}")
-        layout.addWidget(divider)
-
-        self.filter_bar = FilterBar()
-
         content_split = QSplitter(Qt.Orientation.Horizontal)
         content_split.setContentsMargins(0, 0, 0, 0)
+        content_split.setChildrenCollapsible(False)
 
         left_panel = QWidget()
+        left_panel.setMinimumWidth(480)
         left_layout = QVBoxLayout()
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(0)
+
+        left_layout.addWidget(self.search_bar.get_settings_widget())
+
+        settings_filter_separator = QFrame()
+        settings_filter_separator.setFixedHeight(1)
+        settings_filter_separator.setStyleSheet(f"background-color: {COLORS.BORDER_DEFAULT}; border: none;")
+        left_layout.addWidget(settings_filter_separator)
+
+        self.filter_bar = FilterBar()
         left_layout.addWidget(self.filter_bar)
 
         self.result_list = ResultListWidget()
@@ -2121,15 +2448,27 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(self.result_list, 1)
         left_panel.setLayout(left_layout)
 
+        right_panel = QWidget()
+        right_panel.setMinimumWidth(320)
+        right_layout = QVBoxLayout()
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(0)
+
+        self._search_scope_panel = SearchScopePanel()
+        right_layout.addWidget(self._search_scope_panel)
+
         self.preview_panel = PreviewPanel()
         self.preview_panel.setMinimumWidth(200)
+        right_layout.addWidget(self.preview_panel, 1)
+
+        right_panel.setLayout(right_layout)
 
         content_split.addWidget(left_panel)
-        content_split.addWidget(self.preview_panel)
+        content_split.addWidget(right_panel)
         content_split.setStretchFactor(0, 3)
-        content_split.setStretchFactor(1, 1)
-        content_split.setSizes([750, 250])
-        content_split.setHandleWidth(2)
+        content_split.setStretchFactor(1, 2)
+        content_split.setSizes([660, 440])
+        content_split.setHandleWidth(3)
         content_split.setStyleSheet(splitter_style())
 
         layout.addWidget(content_split, 1)
@@ -2483,6 +2822,14 @@ class MainWindow(QMainWindow):
         all_dirs = self._search_scope_panel.get_all_scanned_dirs()
         selected_dirs = self._search_scope_panel.get_selected_dirs()
         self._selected_dirs = set(selected_dirs)
+
+        if not all_dirs and not self._search_scope_panel.get_search_dirs():
+            _styled_msg_box(
+                self, QMessageBox.Icon.Warning,
+                "无可搜索目录",
+                "当前没有可搜索的目录。请先添加扫描路径并完成扫描。"
+            )
+            return
 
         query = SearchQuery(
             name_query=name_query if name_query else None,

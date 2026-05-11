@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import (QWidget, QLineEdit, QHBoxLayout, QVBoxLayout,
                              QCheckBox, QPushButton, QLabel, QRadioButton,
-                             QButtonGroup, QDialog, QSizePolicy)
+                             QComboBox, QDialog, QSizePolicy, QStyleOptionButton)
 from PySide6.QtCore import (Signal, Qt, QPropertyAnimation, QEasingCurve, QSize,
                            QTimer, QRectF, Property, QPoint, QParallelAnimationGroup)
 from PySide6.QtGui import (QFont, QFontMetrics, QIcon, QPainter, QPen, QColor,
@@ -8,12 +8,125 @@ from PySide6.QtGui import (QFont, QFontMetrics, QIcon, QPainter, QPen, QColor,
 
 from constants import SEARCH_DEBOUNCE_MS
 from utils.thread_helper import Debouncer
-from ..style_constants import COLORS, FONT, RADIUS, BTN
+from utils.flow_layout import FlowLayout
+from ..style_constants import COLORS, FONT, RADIUS, BTN, TRANSITION
+from ..modern_dialog import ModernDialogBase
 from ..style_manager import (
     search_input_style, search_button_style, radio_button_style,
-    checkbox_style, dialog_frame_style, dialog_title_style,
+    dialog_frame_style, dialog_title_style,
     button_primary, label_caption_style, label_micro_style,
+    combo_box_style,
 )
+
+
+class AnimatedRadioButton(QRadioButton):
+    _INDICATOR_MARGIN = 3
+
+    def __init__(self, text="", parent=None, font_pt=None):
+        super().__init__(text, parent)
+        self._check_opacity = 0.0
+        self._hovered = False
+        self._font_pt = font_pt or FONT.CAPTION_PT
+        self._anim = QPropertyAnimation(self, b"check_opacity")
+        self._anim.setDuration(150)
+        self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self.toggled.connect(self._on_toggled)
+
+    def _on_toggled(self, checked):
+        self._anim.stop()
+        self._anim.setStartValue(self._check_opacity)
+        self._anim.setEndValue(1.0 if checked else 0.0)
+        self._anim.start()
+
+    def get_check_opacity(self):
+        return self._check_opacity
+
+    def set_check_opacity(self, opacity):
+        self._check_opacity = opacity
+        self.update()
+
+    check_opacity = Property(float, get_check_opacity, set_check_opacity)
+
+    def enterEvent(self, event):
+        self._hovered = True
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self._hovered = False
+        self.update()
+        super().leaveEvent(event)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        m = self._INDICATOR_MARGIN
+        indicator_size = 14
+        indicator_y = (self.height() - indicator_size) / 2
+        indicator_rect = QRectF(m, indicator_y, indicator_size, indicator_size)
+        center = indicator_rect.center()
+        outer_radius = indicator_size / 2
+
+        if self.isEnabled():
+            if self.isChecked():
+                border_color = QColor(COLORS.BRAND)
+                border_color.setAlphaF(max(0.3, self._check_opacity))
+                if self._hovered:
+                    border_color = QColor(COLORS.BRAND_HOVER)
+                    border_color.setAlphaF(max(0.5, self._check_opacity))
+                painter.setPen(QPen(border_color, 2))
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.drawEllipse(center, outer_radius, outer_radius)
+
+                inner_radius = outer_radius * 0.4
+                dot_color = QColor(COLORS.BRAND_HOVER if self._hovered else COLORS.BRAND)
+                dot_color.setAlphaF(self._check_opacity)
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(dot_color)
+                painter.drawEllipse(center, inner_radius, inner_radius)
+            else:
+                hover_border = QColor(COLORS.BRAND) if self._hovered else QColor(COLORS.BORDER_HOVER)
+                painter.setPen(QPen(hover_border, 2))
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.drawEllipse(center, outer_radius, outer_radius)
+        else:
+            if self.isChecked():
+                painter.setPen(QPen(QColor(COLORS.BORDER_HOVER), 2))
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.drawEllipse(center, outer_radius, outer_radius)
+
+                inner_radius = outer_radius * 0.4
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(QColor(COLORS.BORDER_HOVER))
+                painter.drawEllipse(center, inner_radius, inner_radius)
+            else:
+                painter.setPen(QPen(QColor(COLORS.BORDER_DEFAULT), 2))
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.drawEllipse(center, outer_radius, outer_radius)
+
+        text_x = m + indicator_size + 6
+        text_color = QColor(COLORS.TEXT_SECONDARY if self.isEnabled() else COLORS.TEXT_PLACEHOLDER)
+        if self._hovered and self.isEnabled():
+            text_color = QColor(COLORS.TEXT_PRIMARY)
+        painter.setPen(text_color)
+        font = QFont()
+        font.setPointSize(self._font_pt)
+        painter.setFont(font)
+        fm = QFontMetrics(font)
+        text_rect = QRectF(text_x, 0, fm.horizontalAdvance(self.text()) + 4, self.height())
+        painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, self.text())
+        painter.end()
+
+    def minimumSizeHint(self):
+        font = QFont()
+        font.setPointSize(self._font_pt)
+        fm = QFontMetrics(font)
+        text_width = fm.horizontalAdvance(self.text())
+        return QSize(self._INDICATOR_MARGIN + 14 + 6 + text_width + 4, 26)
+
+    def sizeHint(self):
+        return self.minimumSizeHint()
 
 
 class SegmentedControl(QWidget):
@@ -24,12 +137,14 @@ class SegmentedControl(QWidget):
         self._segments = ['文件名', '文件内容']
         self._current_index = 0
         self._slider_pos = 0.0
-        self.setFixedHeight(32)
+        self._hovered_segment = -1
+        self.setFixedHeight(30)
         self._slider_anim = QPropertyAnimation(self, b"slider_pos")
         self._slider_anim.setDuration(200)
         self._slider_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.setMouseTracking(True)
 
     def get_slider_pos(self):
         return self._slider_pos
@@ -54,14 +169,28 @@ class SegmentedControl(QWidget):
         return self._current_index
 
     def minimumSizeHint(self):
-        fm = QFontMetrics(QFont("Microsoft YaHei", 12))
+        fm = QFontMetrics(QFont("Microsoft YaHei", 11))
         w = 0
         for s in self._segments:
             w += fm.horizontalAdvance(s) + 32
-        return QSize(w + 8, 32)
+        return QSize(w + 8, 30)
 
     def sizeHint(self):
         return self.minimumSizeHint()
+
+    def mouseMoveEvent(self, event):
+        seg_w = self.width() / len(self._segments)
+        idx = int(event.position().x() / seg_w)
+        idx = max(0, min(idx, len(self._segments) - 1))
+        if idx != self._hovered_segment:
+            self._hovered_segment = idx
+            self.update()
+        super().mouseMoveEvent(event)
+
+    def leaveEvent(self, event):
+        self._hovered_segment = -1
+        self.update()
+        super().leaveEvent(event)
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -69,40 +198,46 @@ class SegmentedControl(QWidget):
 
         w = self.width()
         h = self.height()
-        r = 8
+        r = BTN.BORDER_RADIUS
 
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(COLORS.BG_HOVER))
-        painter.drawRoundedRect(0, 0, w, h, r, r)
+        painter.setBrush(QColor(COLORS.BG_SECONDARY))
+        painter.drawRoundedRect(QRectF(0, 0, w, h), r, r)
 
         painter.setPen(QPen(QColor(COLORS.BORDER_DEFAULT), 1))
         painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawRoundedRect(0, 0, w, h, r, r)
+        painter.drawRoundedRect(QRectF(0, 0, w, h), r, r)
 
         seg_w = w / len(self._segments)
         slider_x = self._slider_pos * seg_w + 2
         slider_w = seg_w - 4
         slider_h = h - 4
         slider_y = 2
-        slider_r = 6
+        slider_r = max(r - 2, 2)
 
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QColor(COLORS.BRAND))
-        painter.drawRoundedRect(int(slider_x), slider_y, int(slider_w), slider_h, slider_r, slider_r)
+        painter.drawRoundedRect(QRectF(slider_x, slider_y, slider_w, slider_h), slider_r, slider_r)
 
         font = QFont()
         font.setPointSize(FONT.MICRO_PT)
+        font.setWeight(QFont.Weight.Medium)
         painter.setFont(font)
 
         for i, seg in enumerate(self._segments):
-            cx = seg_w * i + seg_w / 2
             if i == self._current_index:
                 painter.setPen(QColor(COLORS.BG_PRIMARY))
                 font.setBold(True)
                 painter.setFont(font)
+            elif i == self._hovered_segment:
+                painter.setPen(QColor(COLORS.TEXT_PRIMARY))
+                font.setBold(False)
+                font.setWeight(QFont.Weight.Medium)
+                painter.setFont(font)
             else:
                 painter.setPen(QColor(COLORS.TEXT_TERTIARY))
                 font.setBold(False)
+                font.setWeight(QFont.Weight.Medium)
                 painter.setFont(font)
             painter.drawText(QRectF(seg_w * i, 0, seg_w, h), Qt.AlignmentFlag.AlignCenter, seg)
 
@@ -117,16 +252,66 @@ class SegmentedControl(QWidget):
         super().mousePressEvent(event)
 
 
+class SettingsArea(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._main_vlayout = QVBoxLayout(self)
+        self._main_vlayout.setContentsMargins(16, 6, 16, 6)
+        self._main_vlayout.setSpacing(2)
+
+        self._flow_layout = FlowLayout(spacing=10)
+        self._main_vlayout.addLayout(self._flow_layout)
+
+    def add_to_line1(self, widget):
+        self._flow_layout.addWidget(widget)
+
+    def set_line2(self, widget):
+        pass
+
+    def add_stretch_to_line1(self):
+        pass
+
+    def set_line2_content_visible(self, visible):
+        pass
+
+
 class AnimatedButton(QPushButton):
     def __init__(self, text="", parent=None):
         super().__init__(text, parent)
         self._orig_size = None
+        self._hover_opacity = 0.0
+        self._hover_anim = QPropertyAnimation(self, b"hover_opacity")
+        self._hover_anim.setDuration(TRANSITION.COLOR_FADE_MS)
+        self._hover_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
         self._press_anim = QPropertyAnimation(self, b"minimumSize")
-        self._press_anim.setDuration(80)
+        self._press_anim.setDuration(TRANSITION.PRESS_SCALE_MS)
         self._press_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
         self._release_anim = QPropertyAnimation(self, b"minimumSize")
-        self._release_anim.setDuration(180)
+        self._release_anim.setDuration(TRANSITION.RELEASE_SCALE_MS)
         self._release_anim.setEasingCurve(QEasingCurve.Type.OutBack)
+
+    def get_hover_opacity(self):
+        return self._hover_opacity
+
+    def set_hover_opacity(self, opacity):
+        self._hover_opacity = opacity
+        self.update()
+
+    hover_opacity = Property(float, get_hover_opacity, set_hover_opacity)
+
+    def enterEvent(self, event):
+        self._hover_anim.stop()
+        self._hover_anim.setStartValue(self._hover_opacity)
+        self._hover_anim.setEndValue(1.0)
+        self._hover_anim.start()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self._hover_anim.stop()
+        self._hover_anim.setStartValue(self._hover_opacity)
+        self._hover_anim.setEndValue(0.0)
+        self._hover_anim.start()
+        super().leaveEvent(event)
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -159,9 +344,13 @@ class AnimatedButton(QPushButton):
 
 
 class AnimatedCheckBox(QCheckBox):
-    def __init__(self, text="", parent=None):
+    _INDICATOR_MARGIN = 3
+
+    def __init__(self, text="", parent=None, font_pt=None):
         super().__init__(text, parent)
         self._check_opacity = 0.0
+        self._hovered = False
+        self._font_pt = font_pt or FONT.CAPTION_PT
         self._anim = QPropertyAnimation(self, b"check_opacity")
         self._anim.setDuration(150)
         self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
@@ -182,18 +371,30 @@ class AnimatedCheckBox(QCheckBox):
 
     check_opacity = Property(float, get_check_opacity, set_check_opacity)
 
+    def enterEvent(self, event):
+        self._hovered = True
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self._hovered = False
+        self.update()
+        super().leaveEvent(event)
+
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        indicator_rect = QRectF(0, (self.height() - 18) / 2, 18, 18)
-        painter.setPen(QPen(QColor(COLORS.BORDER_HOVER), 2))
-        painter.setBrush(QColor(COLORS.BG_PRIMARY))
+        m = self._INDICATOR_MARGIN
+        indicator_rect = QRectF(m, (self.height() - 18) / 2, 18, 18)
+        border_color = QColor(COLORS.BRAND if self._hovered else COLORS.BORDER_HOVER)
+        painter.setPen(QPen(border_color, 2))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawRoundedRect(indicator_rect, 5, 5)
 
         if self.isChecked():
             painter.setPen(Qt.PenStyle.NoPen)
-            bg_color = QColor(COLORS.BRAND)
+            bg_color = QColor(COLORS.BRAND_HOVER if self._hovered else COLORS.BRAND)
             bg_color.setAlphaF(self._check_opacity)
             painter.setBrush(bg_color)
             painter.drawRoundedRect(indicator_rect, 5, 5)
@@ -209,10 +410,11 @@ class AnimatedCheckBox(QCheckBox):
                 painter.drawLine(int(indicator_rect.center().x() - 1), int(indicator_rect.bottom() - 5),
                                int(indicator_rect.right() - 4), int(indicator_rect.top() + 5))
 
-        text_x = 26
-        painter.setPen(QColor(COLORS.TEXT_SECONDARY))
+        text_x = m + 18 + 8
+        text_color = QColor(COLORS.TEXT_PRIMARY if self._hovered else COLORS.TEXT_SECONDARY)
+        painter.setPen(text_color)
         font = QFont()
-        font.setPointSize(FONT.CAPTION_PT)
+        font.setPointSize(self._font_pt)
         painter.setFont(font)
         fm = QFontMetrics(font)
         text_rect = QRectF(text_x, 0, fm.horizontalAdvance(self.text()) + 4, self.height())
@@ -221,10 +423,10 @@ class AnimatedCheckBox(QCheckBox):
 
     def minimumSizeHint(self):
         font = QFont()
-        font.setPointSize(FONT.CAPTION_PT)
+        font.setPointSize(self._font_pt)
         fm = QFontMetrics(font)
         text_width = fm.horizontalAdvance(self.text())
-        return QSize(26 + text_width + 16, 26)
+        return QSize(self._INDICATOR_MARGIN + 18 + 8 + text_width + 4, 26)
 
     def sizeHint(self):
         return self.minimumSizeHint()
@@ -236,23 +438,34 @@ class HelpIconLabel(QLabel):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedSize(18, 18)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setCursor(Qt.CursorShape.WhatsThisCursor)
         self.setToolTip("了解匹配模式")
+        self._hovered = False
+
+    def enterEvent(self, event):
+        self._hovered = True
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self._hovered = False
+        self.update()
+        super().leaveEvent(event)
 
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
+        bg_color = QColor(COLORS.BRAND_LIGHT_BG) if self._hovered else QColor(COLORS.BG_TERTIARY)
+        painter.setBrush(bg_color)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(COLORS.TEXT_PLACEHOLDER))
         painter.drawEllipse(1, 1, 16, 16)
-
-        painter.setPen(QColor(COLORS.BG_PRIMARY))
+        text_color = QColor(COLORS.BRAND) if self._hovered else QColor(COLORS.TEXT_TERTIARY)
+        painter.setPen(text_color)
         font = QFont()
-        font.setPointSize(FONT.MICRO_PT)
+        font.setPointSize(10)
         font.setBold(True)
         painter.setFont(font)
-        painter.drawText(QRectF(1, 1, 16, 16), Qt.AlignmentFlag.AlignCenter, "?")
+        painter.drawText(QRectF(0, 0, 18, 18), Qt.AlignmentFlag.AlignCenter, "?")
         painter.end()
 
     def mousePressEvent(self, event):
@@ -261,73 +474,54 @@ class HelpIconLabel(QLabel):
         super().mousePressEvent(event)
 
 
-class MatchModeHelpDialog(QDialog):
+class MatchModeHelpDialog(ModernDialogBase):
     def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("匹配模式说明")
-        self.setWindowFlags(self.windowFlags() | Qt.WindowType.FramelessWindowHint)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setFixedWidth(380)
+        super().__init__(parent, title="匹配模式说明", min_width=380, resizable=False)
         self._init_ui()
 
     def _init_ui(self):
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(12, 12, 12, 12)
+        def build_content(content_widget):
+            layout = QVBoxLayout(content_widget)
+            layout.setSpacing(12)
+            layout.setContentsMargins(24, 4, 24, 24)
 
-        shadow_frame = QWidget()
-        shadow_frame.setObjectName("shadowFrame")
-        shadow_frame.setStyleSheet(dialog_frame_style().replace("QFrame#shadowFrame", "QWidget#shadowFrame"))
+            modes = [
+                ("模糊匹配", "输入关键词，在文件名中任意位置匹配。例如输入\"read\"可匹配\"README.md\"、\"spreadsheet.xlsx\"。"),
+                ("精确匹配", "输入完整文件名（含扩展名），必须完全一致才匹配。例如输入\"main.py\"只匹配\"main.py\"。"),
+                ("通配符匹配", "使用通配符 * 和 ? 进行匹配。* 匹配任意多个字符，? 匹配单个字符。例如\"*.py\"匹配所有Python文件。"),
+                ("正则表达式", "使用正则表达式进行高级匹配，适合有经验的用户。例如\"\\d+\\.py\"匹配以数字开头的Python文件。"),
+            ]
 
-        layout = QVBoxLayout(shadow_frame)
-        layout.setSpacing(12)
-        layout.setContentsMargins(24, 20, 24, 20)
+            for name, desc in modes:
+                mode_layout = QVBoxLayout()
+                mode_layout.setSpacing(2)
+                mode_layout.setContentsMargins(0, 0, 0, 0)
 
-        title_label = QLabel("匹配模式说明")
-        title_font = QFont()
-        title_font.setPointSize(FONT.TITLE_PT)
-        title_font.setBold(True)
-        title_label.setFont(title_font)
-        title_label.setStyleSheet(dialog_title_style())
+                name_label = QLabel(name)
+                name_label.setStyleSheet(f"color: {COLORS.BRAND}; font-size: {BTN.FONT_SIZE}; font-weight: bold; border: none; background: transparent;")
 
-        modes = [
-            ("模糊匹配", "输入关键词，在文件名中任意位置匹配。例如输入\"read\"可匹配\"README.md\"、\"spreadsheet.xlsx\"。"),
-            ("精确匹配", "输入完整文件名（含扩展名），必须完全一致才匹配。例如输入\"main.py\"只匹配\"main.py\"。"),
-            ("通配符匹配", "使用通配符 * 和 ? 进行匹配。* 匹配任意多个字符，? 匹配单个字符。例如\"*.py\"匹配所有Python文件。"),
-            ("正则表达式", "使用正则表达式进行高级匹配，适合有经验的用户。例如\"\\d+\\.py\"匹配以数字开头的Python文件。"),
-        ]
+                desc_label = QLabel(desc)
+                desc_label.setWordWrap(True)
+                desc_label.setStyleSheet(label_caption_style())
 
-        layout.addWidget(title_label)
+                mode_layout.addWidget(name_label)
+                mode_layout.addWidget(desc_label)
+                layout.addLayout(mode_layout)
 
-        for name, desc in modes:
-            mode_layout = QVBoxLayout()
-            mode_layout.setSpacing(2)
-            mode_layout.setContentsMargins(0, 0, 0, 0)
+            close_btn = QPushButton("我知道了")
+            close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            close_btn.setStyleSheet(button_primary("padding: 8px 28px; border-radius: 10px; min-width: 80px;"))
+            close_btn.clicked.connect(self.accept)
 
-            name_label = QLabel(name)
-            name_label.setStyleSheet(f"color: {COLORS.BRAND}; font-size: {BTN.FONT_SIZE}; font-weight: bold; border: none; background: transparent;")
+            btn_row = QHBoxLayout()
+            btn_row.addStretch()
+            btn_row.addWidget(close_btn)
+            btn_row.addStretch()
 
-            desc_label = QLabel(desc)
-            desc_label.setWordWrap(True)
-            desc_label.setStyleSheet(label_caption_style())
+            layout.addSpacing(4)
+            layout.addLayout(btn_row)
 
-            mode_layout.addWidget(name_label)
-            mode_layout.addWidget(desc_label)
-            layout.addLayout(mode_layout)
-
-        close_btn = QPushButton("我知道了")
-        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        close_btn.setStyleSheet(button_primary("padding: 8px 28px; border-radius: 10px; min-width: 80px;"))
-        close_btn.clicked.connect(self.accept)
-
-        btn_row = QHBoxLayout()
-        btn_row.addStretch()
-        btn_row.addWidget(close_btn)
-        btn_row.addStretch()
-
-        layout.addSpacing(4)
-        layout.addLayout(btn_row)
-
-        outer.addWidget(shadow_frame)
+        self._create_shadow_frame(build_content)
 
 
 class SearchBar(QWidget):
@@ -380,54 +574,59 @@ class SearchBar(QWidget):
         search_area.setLayout(search_layout)
         search_area.setStyleSheet(f"QWidget {{ background-color: {COLORS.BG_PRIMARY}; }}")
 
-        settings_area = QWidget()
-        settings_layout = QHBoxLayout()
-        settings_layout.setContentsMargins(20, 6, 20, 6)
-        settings_layout.setSpacing(12)
+        self._settings_area = SettingsArea()
 
         self.segmented_control = SegmentedControl()
         self.segmented_control.mode_changed.connect(self._set_mode)
 
-        settings_layout.addWidget(self.segmented_control)
+        self._settings_area.add_to_line1(self.segmented_control)
 
-        self.case_sensitive_checkbox = AnimatedCheckBox("区分大小写")
-        self.case_sensitive_checkbox.setStyleSheet(checkbox_style())
+        settings_font_size = f"{FONT.MICRO_PT}px"
 
-        settings_layout.addWidget(self.case_sensitive_checkbox)
+        self.case_sensitive_checkbox = AnimatedCheckBox("区分大小写", font_pt=FONT.MICRO_PT)
+        self.case_sensitive_checkbox.setStyleSheet(f"""
+            QCheckBox {{
+                spacing: 6px;
+                font-size: {settings_font_size};
+                color: {COLORS.TEXT_SECONDARY};
+                outline: none;
+                text-decoration: none;
+                border: none;
+                background: transparent;
+            }}
+            QCheckBox:focus {{
+                outline: none;
+                border: none;
+            }}
+        """)
+
+        self._settings_area.add_to_line1(self.case_sensitive_checkbox)
 
         self.match_mode_label = QLabel("匹配模式:")
-        self.match_mode_label.setStyleSheet(label_caption_style())
-        settings_layout.addWidget(self.match_mode_label)
+        self.match_mode_label.setStyleSheet(f"font-size: {settings_font_size}; color: {COLORS.TEXT_SECONDARY}; border: none; background: transparent; text-decoration: none;")
+        self._settings_area.add_to_line1(self.match_mode_label)
+
+        self._match_mode_combo = QComboBox()
+        for mode in self.MATCH_MODES:
+            self._match_mode_combo.addItem(self.MATCH_MODE_LABELS[mode], mode)
+        self._match_mode_combo.setCurrentIndex(0)
+        self._match_mode_combo.setFixedHeight(28)
+        self._match_mode_combo.setStyleSheet(combo_box_style())
+        self._match_mode_combo.currentIndexChanged.connect(self._on_match_mode_changed)
+        self._settings_area.add_to_line1(self._match_mode_combo)
 
         self.help_icon = HelpIconLabel()
         self.help_icon.clicked.connect(self._show_match_mode_help)
-        settings_layout.addWidget(self.help_icon)
+        self._settings_area.add_to_line1(self.help_icon)
 
-        self._match_mode_group = QButtonGroup(self)
-        self._match_mode_radios = {}
-        for mode in self.MATCH_MODES:
-            radio = QRadioButton(self.MATCH_MODE_LABELS[mode])
-            radio.setCursor(Qt.CursorShape.PointingHandCursor)
-            radio.setStyleSheet(radio_button_style())
-            if mode == self._name_match_mode:
-                radio.setChecked(True)
-            radio.clicked.connect(lambda checked, m=mode: self._set_match_mode(m))
-            self._match_mode_group.addButton(radio)
-            self._match_mode_radios[mode] = radio
-            settings_layout.addWidget(radio)
-
-        settings_layout.addStretch()
-
-        settings_area.setLayout(settings_layout)
-        settings_area.setStyleSheet(f"""
+        self._settings_area.setStyleSheet(f"""
             QWidget {{
-                background-color: {COLORS.BG_TERTIARY};
+                background-color: {COLORS.BG_SECONDARY};
                 border-bottom: 1px solid {COLORS.BORDER_DEFAULT};
             }}
         """)
 
         main_layout.addWidget(search_area)
-        main_layout.addWidget(settings_area)
 
         self.setLayout(main_layout)
         self.setStyleSheet(f"""
@@ -442,20 +641,22 @@ class SearchBar(QWidget):
         if mode == 'name':
             self.search_input.setPlaceholderText("输入文件名关键词搜索...")
             self.match_mode_label.setVisible(True)
+            self._match_mode_combo.setVisible(True)
             self.help_icon.setVisible(True)
-            for radio in self._match_mode_radios.values():
-                radio.setVisible(True)
         else:
             self.search_input.setPlaceholderText("输入文件内容关键词搜索...")
             self.match_mode_label.setVisible(False)
+            self._match_mode_combo.setVisible(False)
             self.help_icon.setVisible(False)
-            for radio in self._match_mode_radios.values():
-                radio.setVisible(False)
 
     def _set_match_mode(self, mode: str):
         self._name_match_mode = mode
-        if mode in self._match_mode_radios:
-            self._match_mode_radios[mode].setChecked(True)
+        idx = self.MATCH_MODES.index(mode) if mode in self.MATCH_MODES else 0
+        self._match_mode_combo.setCurrentIndex(idx)
+
+    def _on_match_mode_changed(self, index: int):
+        if 0 <= index < len(self.MATCH_MODES):
+            self._name_match_mode = self.MATCH_MODES[index]
 
     def _show_match_mode_help(self):
         dialog = MatchModeHelpDialog(self)
@@ -476,6 +677,9 @@ class SearchBar(QWidget):
 
     def is_case_sensitive(self):
         return self.case_sensitive_checkbox.isChecked()
+
+    def get_settings_widget(self):
+        return self._settings_area
 
     def get_name_mode(self) -> str:
         return self._name_match_mode

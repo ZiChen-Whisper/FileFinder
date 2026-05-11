@@ -4,12 +4,13 @@ from PySide6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QPushButton,
                              QMessageBox, QProgressBar, QSizePolicy, QLineEdit,
                              QFileDialog, QFrame, QApplication, QRadioButton,
                              QButtonGroup, QComboBox)
-from PySide6.QtCore import Signal, Qt, QPropertyAnimation, QEasingCurve, QSize, QPointF, QRectF
-from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QPen, QFont, QPolygonF
+from PySide6.QtCore import Signal, Qt, QPropertyAnimation, QEasingCurve, QSize, QPointF, QRectF, Property
+from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QPen, QFont, QFontMetrics, QPolygonF
 from constants import FILE_TYPE_CATEGORIES
 from utils.path_helper import get_all_drives, get_user_directories, normalize_path
 from database.db_manager import DatabaseManager
-from ..style_constants import COLORS, FONT, RADIUS, BTN, DIALOG
+from ..style_constants import COLORS, FONT, RADIUS, BTN, DIALOG, TRANSITION
+from ..modern_dialog import ModernDialogBase
 from ..style_manager import (
     msg_box_style, button_primary, button_secondary, button_filter,
     button_scan, button_scan_green, button_small_primary, button_small_secondary,
@@ -20,67 +21,162 @@ from ..style_manager import (
 )
 
 
-class _ModernMessageBox(QDialog):
+class AnimatedRadioButton(QRadioButton):
+    _INDICATOR_MARGIN = 3
+
+    def __init__(self, text="", parent=None, font_pt=None):
+        super().__init__(text, parent)
+        self._check_opacity = 0.0
+        self._hovered = False
+        self._font_pt = font_pt or FONT.CAPTION_PT
+        self._anim = QPropertyAnimation(self, b"check_opacity")
+        self._anim.setDuration(150)
+        self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self.toggled.connect(self._on_toggled)
+
+    def _on_toggled(self, checked):
+        self._anim.stop()
+        self._anim.setStartValue(self._check_opacity)
+        self._anim.setEndValue(1.0 if checked else 0.0)
+        self._anim.start()
+
+    def get_check_opacity(self):
+        return self._check_opacity
+
+    def set_check_opacity(self, opacity):
+        self._check_opacity = opacity
+        self.update()
+
+    check_opacity = Property(float, get_check_opacity, set_check_opacity)
+
+    def enterEvent(self, event):
+        self._hovered = True
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self._hovered = False
+        self.update()
+        super().leaveEvent(event)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        m = self._INDICATOR_MARGIN
+        indicator_size = 14
+        indicator_y = (self.height() - indicator_size) / 2
+        indicator_rect = QRectF(m, indicator_y, indicator_size, indicator_size)
+        center = indicator_rect.center()
+        outer_radius = indicator_size / 2
+
+        if self.isEnabled():
+            if self.isChecked():
+                border_color = QColor(COLORS.BRAND)
+                border_color.setAlphaF(max(0.3, self._check_opacity))
+                if self._hovered:
+                    border_color = QColor(COLORS.BRAND_HOVER)
+                    border_color.setAlphaF(max(0.5, self._check_opacity))
+                painter.setPen(QPen(border_color, 2))
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.drawEllipse(center, outer_radius, outer_radius)
+
+                inner_radius = outer_radius * 0.4
+                dot_color = QColor(COLORS.BRAND_HOVER if self._hovered else COLORS.BRAND)
+                dot_color.setAlphaF(self._check_opacity)
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(dot_color)
+                painter.drawEllipse(center, inner_radius, inner_radius)
+            else:
+                hover_border = QColor(COLORS.BRAND) if self._hovered else QColor(COLORS.BORDER_HOVER)
+                painter.setPen(QPen(hover_border, 2))
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.drawEllipse(center, outer_radius, outer_radius)
+        else:
+            if self.isChecked():
+                painter.setPen(QPen(QColor(COLORS.BORDER_HOVER), 2))
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.drawEllipse(center, outer_radius, outer_radius)
+
+                inner_radius = outer_radius * 0.4
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(QColor(COLORS.BORDER_HOVER))
+                painter.drawEllipse(center, inner_radius, inner_radius)
+            else:
+                painter.setPen(QPen(QColor(COLORS.BORDER_DEFAULT), 2))
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.drawEllipse(center, outer_radius, outer_radius)
+
+        text_x = m + indicator_size + 6
+        text_color = QColor(COLORS.TEXT_SECONDARY if self.isEnabled() else COLORS.TEXT_PLACEHOLDER)
+        if self._hovered and self.isEnabled():
+            text_color = QColor(COLORS.TEXT_PRIMARY)
+        painter.setPen(text_color)
+        font = QFont()
+        font.setPointSize(self._font_pt)
+        painter.setFont(font)
+        fm = QFontMetrics(font)
+        text_rect = QRectF(text_x, 0, fm.horizontalAdvance(self.text()) + 4, self.height())
+        painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, self.text())
+        painter.end()
+
+    def minimumSizeHint(self):
+        font = QFont()
+        font.setPointSize(self._font_pt)
+        fm = QFontMetrics(font)
+        text_width = fm.horizontalAdvance(self.text())
+        return QSize(self._INDICATOR_MARGIN + 14 + 6 + text_width + 4, 26)
+
+    def sizeHint(self):
+        return self.minimumSizeHint()
+
+
+class _ModernMessageBox(ModernDialogBase):
     def __init__(self, parent=None, icon_type='info', title='', text='', buttons=None):
-        super().__init__(parent)
+        super().__init__(parent, title=title, min_width=DIALOG.MIN_WIDTH, resizable=False)
         self._result = None
         self._buttons = buttons or {}
-        self.setWindowTitle(title)
-        self.setWindowFlags(self.windowFlags() | Qt.WindowType.FramelessWindowHint)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setMinimumWidth(DIALOG.MIN_WIDTH)
         self._icon_type = icon_type
-        self._title_text = title
         self._text = text
         self._init_ui()
 
     def _init_ui(self):
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(DIALOG.OUTER_MARGIN, DIALOG.OUTER_MARGIN, DIALOG.OUTER_MARGIN, DIALOG.OUTER_MARGIN)
-        shadow_frame = QFrame()
-        shadow_frame.setObjectName("shadowFrame")
-        shadow_frame.setStyleSheet(dialog_frame_style())
-        layout = QVBoxLayout(shadow_frame)
-        layout.setSpacing(DIALOG.CONTENT_SPACING)
-        layout.setContentsMargins(DIALOG.PADDING, DIALOG.PADDING, DIALOG.PADDING, 24)
-        icon_label = QLabel()
-        icon_label.setFixedSize(48, 48)
-        icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon_label.setPixmap(self._create_icon_pixmap())
-        title_label = QLabel(self._title_text)
-        title_font = QFont()
-        title_font.setPointSize(FONT.TITLE_PT)
-        title_font.setBold(True)
-        title_label.setFont(title_font)
-        title_label.setStyleSheet(dialog_title_style())
-        text_label = QLabel(self._text)
-        text_label.setStyleSheet(dialog_body_style())
-        text_label.setWordWrap(True)
-        content_row = QHBoxLayout()
-        content_row.setSpacing(DIALOG.CONTENT_SPACING)
-        content_row.addWidget(icon_label, 0, Qt.AlignmentFlag.AlignTop)
-        col = QVBoxLayout()
-        col.setSpacing(6)
-        col.addWidget(title_label)
-        col.addWidget(text_label)
-        col.addStretch()
-        content_row.addLayout(col, 1)
-        btn_row = QHBoxLayout()
-        btn_row.addStretch()
-        for key, (label, style_type) in self._buttons.items():
-            btn = QPushButton(label)
-            btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            if style_type == 'primary':
-                btn.setStyleSheet(button_primary("padding: 8px 28px; border-radius: 10px; min-width: 80px;"))
-            else:
-                btn.setStyleSheet(button_secondary("padding: 8px 28px; border-radius: 10px; min-width: 80px;"))
-            btn.clicked.connect(lambda checked, k=key: self._on_button(k))
-            btn_row.addWidget(btn)
-            btn_row.addSpacing(DIALOG.BUTTON_SPACING)
-        layout.addLayout(content_row)
-        layout.addSpacing(8)
-        layout.addLayout(btn_row)
-        outer.addWidget(shadow_frame)
+        def build_content(content_widget):
+            layout = QVBoxLayout(content_widget)
+            layout.setSpacing(DIALOG.CONTENT_SPACING)
+            layout.setContentsMargins(DIALOG.PADDING, 4, DIALOG.PADDING, DIALOG.PADDING)
+            icon_label = QLabel()
+            icon_label.setFixedSize(48, 48)
+            icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            icon_label.setPixmap(self._create_icon_pixmap())
+            text_label = QLabel(self._text)
+            text_label.setStyleSheet(dialog_body_style())
+            text_label.setWordWrap(True)
+            content_row = QHBoxLayout()
+            content_row.setSpacing(DIALOG.CONTENT_SPACING)
+            content_row.addWidget(icon_label, 0, Qt.AlignmentFlag.AlignTop)
+            col = QVBoxLayout()
+            col.setSpacing(6)
+            col.addWidget(text_label)
+            col.addStretch()
+            content_row.addLayout(col, 1)
+            btn_row = QHBoxLayout()
+            btn_row.addStretch()
+            for key, (label, style_type) in self._buttons.items():
+                btn = QPushButton(label)
+                btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                if style_type == 'primary':
+                    btn.setStyleSheet(button_primary("padding: 8px 28px; border-radius: 10px; min-width: 80px;"))
+                else:
+                    btn.setStyleSheet(button_secondary("padding: 8px 28px; border-radius: 10px; min-width: 80px;"))
+                btn.clicked.connect(lambda checked, k=key: self._on_button(k))
+                btn_row.addWidget(btn)
+                btn_row.addSpacing(DIALOG.BUTTON_SPACING)
+            layout.addLayout(content_row)
+            layout.addSpacing(8)
+            layout.addLayout(btn_row)
+
+        self._create_shadow_frame(build_content)
 
     def _create_icon_pixmap(self) -> QPixmap:
         pixmap = QPixmap(48, 48)
@@ -191,12 +287,39 @@ class AnimatedButton(QPushButton):
         if icon_path:
             self.setIcon(QIcon(icon_path))
         self._orig_size = None
+        self._hover_opacity = 0.0
+        self._hover_anim = QPropertyAnimation(self, b"hover_opacity")
+        self._hover_anim.setDuration(150)
+        self._hover_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
         self._press_anim = QPropertyAnimation(self, b"minimumSize")
         self._press_anim.setDuration(80)
         self._press_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
         self._release_anim = QPropertyAnimation(self, b"minimumSize")
         self._release_anim.setDuration(180)
         self._release_anim.setEasingCurve(QEasingCurve.Type.OutBack)
+
+    def get_hover_opacity(self):
+        return self._hover_opacity
+
+    def set_hover_opacity(self, opacity):
+        self._hover_opacity = opacity
+        self.update()
+
+    hover_opacity = Property(float, get_hover_opacity, set_hover_opacity)
+
+    def enterEvent(self, event):
+        self._hover_anim.stop()
+        self._hover_anim.setStartValue(self._hover_opacity)
+        self._hover_anim.setEndValue(1.0)
+        self._hover_anim.start()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self._hover_anim.stop()
+        self._hover_anim.setStartValue(self._hover_opacity)
+        self._hover_anim.setEndValue(0.0)
+        self._hover_anim.start()
+        super().leaveEvent(event)
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -229,183 +352,137 @@ class AnimatedButton(QPushButton):
         super().mouseReleaseEvent(event)
 
 
-class ScanConfirmDialog(QDialog):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("开始扫描")
-        self.setFixedWidth(400)
-        self.setStyleSheet(f"QDialog {{ background-color: {COLORS.BG_PRIMARY}; }}")
-        self._init_ui()
-
-    def _init_ui(self):
-        layout = QVBoxLayout()
-        layout.setSpacing(16)
-        layout.setContentsMargins(24, 24, 24, 20)
-
-        title = QLabel("开始扫描")
-        title_font = QFont()
-        title_font.setPointSize(FONT.DISPLAY_PT)
-        title_font.setBold(True)
-        title.setFont(title_font)
-        title.setStyleSheet(dialog_title_style())
-
-        desc = QLabel("将扫描所选目录/驱动器，这可能需要几分钟时间。\n确定要开始扫描吗？")
-        desc.setStyleSheet(dialog_body_style())
-        desc.setWordWrap(True)
-
-        btn_row = QHBoxLayout()
-        btn_row.addStretch()
-
-        cancel_btn = QPushButton("取消")
-        cancel_btn.setStyleSheet(button_secondary())
-        cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        cancel_btn.clicked.connect(self.reject)
-
-        confirm_btn = QPushButton("开始扫描")
-        confirm_btn.setStyleSheet(button_primary())
-        confirm_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        confirm_btn.clicked.connect(self.accept)
-
-        btn_row.addWidget(cancel_btn)
-        btn_row.addSpacing(8)
-        btn_row.addWidget(confirm_btn)
-
-        layout.addWidget(title)
-        layout.addWidget(desc)
-        layout.addStretch()
-        layout.addLayout(btn_row)
-
-        self.setLayout(layout)
-
-
-class SearchScopeDialog(QDialog):
+class SearchScopeDialog(ModernDialogBase):
     def __init__(self, current_dirs, parent=None):
-        super().__init__(parent)
+        super().__init__(parent, title="管理扫描路径", min_width=520, min_height=420, resizable=True)
         self._dirs = list(current_dirs)
-        self.setWindowTitle("管理扫描路径")
-        self.setMinimumSize(520, 420)
-        self.setStyleSheet(f"QDialog {{ background-color: {COLORS.BG_PRIMARY}; }}")
         self._init_ui()
 
     def _init_ui(self):
-        layout = QVBoxLayout()
-        layout.setSpacing(12)
-        layout.setContentsMargins(20, 20, 20, 20)
+        def build_content(content_widget):
+            layout = QVBoxLayout(content_widget)
+            layout.setSpacing(12)
+            layout.setContentsMargins(20, 4, 20, 20)
 
-        header = QLabel("管理扫描路径")
-        header.setStyleSheet(f"font-size: {FONT.DISPLAY_PT}px; font-weight: bold; color: {COLORS.TEXT_PRIMARY}; border: none; background: transparent;")
-        layout.addWidget(header)
+            desc = QLabel("管理要扫描的目录路径。添加/移除目录后需要重新扫描。")
+            desc.setStyleSheet(label_caption_style())
+            desc.setWordWrap(True)
+            layout.addWidget(desc)
 
-        desc = QLabel("管理要扫描的目录路径。添加/移除目录后需要重新扫描。")
-        desc.setStyleSheet(label_caption_style())
-        desc.setWordWrap(True)
-        layout.addWidget(desc)
+            self.dir_list = DirListWidget(self)
+            self.dir_list.setStyleSheet(list_style())
+            for d in self._dirs:
+                item = QListWidgetItem(d)
+                self.dir_list.addItem(item)
+            layout.addWidget(self.dir_list, 1)
 
-        self.dir_list = DirListWidget(self)
-        self.dir_list.setStyleSheet(list_style())
-        for d in self._dirs:
-            item = QListWidgetItem(d)
-            self.dir_list.addItem(item)
-        layout.addWidget(self.dir_list, 1)
+            add_row = QHBoxLayout()
+            add_row.setSpacing(8)
 
-        add_row = QHBoxLayout()
-        add_row.setSpacing(8)
+            self.path_input = QLineEdit()
+            self.path_input.setPlaceholderText("输入目录路径，如 D:\\Projects 或 C:\\Users")
+            self.path_input.setFixedHeight(36)
+            self.path_input.setStyleSheet(input_style())
 
-        self.path_input = QLineEdit()
-        self.path_input.setPlaceholderText("输入目录路径，如 D:\\Projects 或 C:\\Users")
-        self.path_input.setFixedHeight(36)
-        self.path_input.setStyleSheet(input_style())
+            browse_btn = QPushButton("浏览...")
+            browse_btn.setFixedHeight(36)
+            browse_btn.setStyleSheet(button_small_secondary())
+            browse_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            browse_btn.clicked.connect(self._on_browse)
 
-        browse_btn = QPushButton("浏览...")
-        browse_btn.setFixedHeight(36)
-        browse_btn.setStyleSheet(button_small_secondary())
-        browse_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        browse_btn.clicked.connect(self._on_browse)
+            add_btn = QPushButton("+ 添加")
+            add_btn.setFixedHeight(36)
+            add_btn.setStyleSheet(button_small_primary())
+            add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            add_btn.clicked.connect(self._on_add)
 
-        add_btn = QPushButton("+ 添加")
-        add_btn.setFixedHeight(36)
-        add_btn.setStyleSheet(button_small_primary())
-        add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        add_btn.clicked.connect(self._on_add)
+            add_row.addWidget(self.path_input, 1)
+            add_row.addWidget(browse_btn)
+            add_row.addWidget(add_btn)
+            layout.addLayout(add_row)
 
-        add_row.addWidget(self.path_input, 1)
-        add_row.addWidget(browse_btn)
-        add_row.addWidget(add_btn)
-        layout.addLayout(add_row)
+            quick_add_row = QHBoxLayout()
+            quick_add_row.setSpacing(6)
+            quick_label = QLabel("快速添加：")
+            quick_label.setStyleSheet(label_caption_style())
 
-        quick_add_row = QHBoxLayout()
-        quick_add_row.setSpacing(6)
-        quick_label = QLabel("快速添加：")
-        quick_label.setStyleSheet(label_caption_style())
+            all_drives_btn = QPushButton("所有驱动器")
+            all_drives_btn.setStyleSheet(button_small_secondary())
+            all_drives_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            all_drives_btn.clicked.connect(self._on_add_all_drives)
 
-        all_drives_btn = QPushButton("所有驱动器")
-        all_drives_btn.setStyleSheet(button_small_secondary())
-        all_drives_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        all_drives_btn.clicked.connect(self._on_add_all_drives)
+            user_dirs_btn = QPushButton("常用目录")
+            user_dirs_btn.setStyleSheet(button_small_secondary())
+            user_dirs_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            user_dirs_btn.clicked.connect(self._on_add_user_dirs)
 
-        user_dirs_btn = QPushButton("常用目录")
-        user_dirs_btn.setStyleSheet(button_small_secondary())
-        user_dirs_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        user_dirs_btn.clicked.connect(self._on_add_user_dirs)
+            self._quick_drive_btns = []
+            for drive in get_all_drives():
+                drive_letter = drive[:2]
+                btn = QPushButton(drive_letter)
+                btn.setStyleSheet(button_small_secondary())
+                btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                btn.clicked.connect(lambda checked, d=drive: self._on_add_drive(d))
+                self._quick_drive_btns.append(btn)
 
-        self._quick_drive_btns = []
-        for drive in get_all_drives():
-            drive_letter = drive[:2]
-            btn = QPushButton(drive_letter)
-            btn.setStyleSheet(button_small_secondary())
-            btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.clicked.connect(lambda checked, d=drive: self._on_add_drive(d))
-            self._quick_drive_btns.append(btn)
+            desktop_path = os.path.join(os.path.expanduser("~"), "Desktop")
+            desktop_btn = QPushButton("桌面")
+            desktop_btn.setStyleSheet(button_small_secondary())
+            desktop_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            desktop_btn.clicked.connect(lambda: self._on_add_drive(desktop_path))
 
-        desktop_path = os.path.join(os.path.expanduser("~"), "Desktop")
-        desktop_btn = QPushButton("桌面")
-        desktop_btn.setStyleSheet(button_small_secondary())
-        desktop_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        desktop_btn.clicked.connect(lambda: self._on_add_drive(desktop_path))
+            downloads_path = os.path.join(os.path.expanduser("~"), "Downloads")
+            downloads_btn = QPushButton("下载")
+            downloads_btn.setStyleSheet(button_small_secondary())
+            downloads_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            downloads_btn.clicked.connect(lambda: self._on_add_drive(downloads_path))
 
-        downloads_path = os.path.join(os.path.expanduser("~"), "Downloads")
-        downloads_btn = QPushButton("下载")
-        downloads_btn.setStyleSheet(button_small_secondary())
-        downloads_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        downloads_btn.clicked.connect(lambda: self._on_add_drive(downloads_path))
+            documents_path = os.path.join(os.path.expanduser("~"), "Documents")
+            documents_btn = QPushButton("文档")
+            documents_btn.setStyleSheet(button_small_secondary())
+            documents_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            documents_btn.clicked.connect(lambda: self._on_add_drive(documents_path))
 
-        documents_path = os.path.join(os.path.expanduser("~"), "Documents")
-        documents_btn = QPushButton("文档")
-        documents_btn.setStyleSheet(button_small_secondary())
-        documents_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        documents_btn.clicked.connect(lambda: self._on_add_drive(documents_path))
+            quick_add_row.addWidget(quick_label)
+            quick_add_row.addWidget(all_drives_btn)
+            quick_add_row.addWidget(user_dirs_btn)
+            for btn in self._quick_drive_btns:
+                quick_add_row.addWidget(btn)
+            quick_add_row.addWidget(desktop_btn)
+            quick_add_row.addWidget(downloads_btn)
+            quick_add_row.addWidget(documents_btn)
+            quick_add_row.addStretch()
+            layout.addLayout(quick_add_row)
 
-        quick_add_row.addWidget(quick_label)
-        quick_add_row.addWidget(all_drives_btn)
-        quick_add_row.addWidget(user_dirs_btn)
-        for btn in self._quick_drive_btns:
-            quick_add_row.addWidget(btn)
-        quick_add_row.addWidget(desktop_btn)
-        quick_add_row.addWidget(downloads_btn)
-        quick_add_row.addWidget(documents_btn)
-        quick_add_row.addStretch()
-        layout.addLayout(quick_add_row)
+            btn_row = QHBoxLayout()
+            btn_row.addStretch()
 
-        btn_row = QHBoxLayout()
-        btn_row.addStretch()
+            cancel_btn = QPushButton("取消")
+            cancel_btn.setStyleSheet(button_secondary())
+            cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            cancel_btn.clicked.connect(self.reject)
 
-        cancel_btn = QPushButton("取消")
-        cancel_btn.setStyleSheet(button_secondary())
-        cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        cancel_btn.clicked.connect(self.reject)
+            confirm_btn = QPushButton("确定")
+            confirm_btn.setStyleSheet(button_primary())
+            confirm_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            confirm_btn.clicked.connect(self._on_confirm)
 
-        confirm_btn = QPushButton("确定")
-        confirm_btn.setStyleSheet(button_primary())
-        confirm_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        confirm_btn.clicked.connect(self.accept)
+            btn_row.addWidget(cancel_btn)
+            btn_row.addSpacing(8)
+            btn_row.addWidget(confirm_btn)
 
-        btn_row.addWidget(cancel_btn)
-        btn_row.addSpacing(8)
-        btn_row.addWidget(confirm_btn)
+            layout.addLayout(btn_row)
 
-        layout.addLayout(btn_row)
+        self._create_shadow_frame(build_content)
 
-        self.setLayout(layout)
+    def _on_confirm(self):
+        if not self._dirs:
+            _styled_msg_box(
+                self, QMessageBox.Icon.Warning,
+                "路径不能为空", "至少需要保留一个扫描路径，否则无法进行搜索。"
+            )
+            return
+        self.accept()
 
     def _remove_dir_item(self, item):
         path = item.text()
@@ -517,6 +594,7 @@ class FilterBar(QWidget):
     scope_changed = Signal(list)
     scan_requested = Signal()
     sort_changed = Signal(str)
+    sort_order_changed = Signal(bool)
 
     SORT_OPTIONS = [
         ('name', '名称'),
@@ -533,6 +611,7 @@ class FilterBar(QWidget):
         self._indexed_count = 0
         self._is_scanning = False
         self._sort_mode = 'name'
+        self._sort_ascending = True
         self._init_ui()
         self._reload_scope()
 
@@ -543,7 +622,7 @@ class FilterBar(QWidget):
 
     def _init_ui(self):
         main_layout = QVBoxLayout()
-        main_layout.setContentsMargins(20, 4, 20, 4)
+        main_layout.setContentsMargins(16, 4, 16, 4)
         main_layout.setSpacing(4)
 
         from utils.flow_layout import FlowLayout
@@ -565,35 +644,73 @@ class FilterBar(QWidget):
         flow_widget.setLayout(flow)
         flow_widget.setStyleSheet("QWidget { background: transparent; }")
 
-        sort_row = QHBoxLayout()
-        sort_row.setSpacing(8)
+        sort_card = QFrame()
+        sort_card.setObjectName("sortCard")
+        sort_card.setStyleSheet(f"""
+            QFrame#sortCard {{
+                background-color: {COLORS.BG_PRIMARY};
+                border: 1px solid {COLORS.BORDER_DEFAULT};
+                border-radius: {BTN.BORDER_RADIUS}px;
+                padding: 6px 10px;
+            }}
+        """)
+        sort_card_layout = QHBoxLayout(sort_card)
+        sort_card_layout.setContentsMargins(6, 4, 6, 4)
+        sort_card_layout.setSpacing(8)
 
         sort_label = QLabel("排序方式:")
         sort_label.setStyleSheet(label_caption_style())
-        sort_row.addWidget(sort_label)
+        sort_card_layout.addWidget(sort_label)
 
         self._sort_group = QButtonGroup(self)
         self._sort_radios = {}
         for mode, label in self.SORT_OPTIONS:
-            radio = QRadioButton(label)
+            radio = AnimatedRadioButton(label, font_pt=FONT.MICRO_PT)
             radio.setCursor(Qt.CursorShape.PointingHandCursor)
-            radio.setStyleSheet(radio_button_style())
             if mode == self._sort_mode:
                 radio.setChecked(True)
             radio.clicked.connect(lambda checked, m=mode: self._on_sort_clicked(m))
             self._sort_group.addButton(radio)
             self._sort_radios[mode] = radio
-            sort_row.addWidget(radio)
+            sort_card_layout.addWidget(radio)
 
-        sort_row.addStretch()
+        sort_card_layout.addStretch()
+
+        sort_order_sep = QFrame()
+        sort_order_sep.setFrameShape(QFrame.Shape.VLine)
+        sort_order_sep.setFixedHeight(16)
+        sort_order_sep.setStyleSheet(f"color: {COLORS.BORDER_DEFAULT}; border: none; background: transparent;")
+        sort_card_layout.addWidget(sort_order_sep)
+
+        self._sort_order_btn = QPushButton("升序")
+        self._sort_order_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._sort_order_btn.setFixedHeight(22)
+        self._sort_order_btn.setStyleSheet(f"""
+            QPushButton {{
+                border: none;
+                border-radius: {RADIUS.SMALL}px;
+                background-color: transparent;
+                color: {COLORS.TEXT_SECONDARY};
+                font-size: {BTN.SMALL_FONT_SIZE};
+                padding: 2px 8px;
+            }}
+            QPushButton:hover {{
+                background-color: {COLORS.BG_HOVER};
+                color: {COLORS.TEXT_PRIMARY};
+            }}
+            QPushButton:pressed {{
+                background-color: {COLORS.BG_TERTIARY};
+            }}
+        """)
+        self._sort_order_btn.clicked.connect(self._toggle_sort_order)
+        sort_card_layout.addWidget(self._sort_order_btn)
 
         main_layout.addWidget(flow_widget)
-        main_layout.addLayout(sort_row)
+        main_layout.addWidget(sort_card)
         self.setLayout(main_layout)
         self.setStyleSheet(f"""
             QWidget {{
                 background-color: {COLORS.BG_SECONDARY};
-                border-bottom: 1px solid {COLORS.BORDER_DEFAULT};
             }}
         """)
 
@@ -606,6 +723,14 @@ class FilterBar(QWidget):
     def _on_sort_clicked(self, mode):
         self._sort_mode = mode
         self.sort_changed.emit(mode)
+
+    def _toggle_sort_order(self):
+        self._sort_ascending = not self._sort_ascending
+        self._sort_order_btn.setText("升序" if self._sort_ascending else "降序")
+        self.sort_order_changed.emit(self._sort_ascending)
+
+    def is_sort_ascending(self):
+        return self._sort_ascending
 
     def get_selected_category(self):
         return self._selected_category

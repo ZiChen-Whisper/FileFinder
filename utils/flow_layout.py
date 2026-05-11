@@ -50,19 +50,31 @@ class FlowLayout(QLayout):
     def _do_layout(self, rect, test_only):
         m = self.contentsMargins()
         eff = rect.adjusted(m.left(), m.top(), -m.right(), -m.bottom())
+        if not self._items:
+            return m.top() + m.bottom()
+        rows = []
+        current_row = []
         x = eff.x()
-        y = eff.y()
         row_height = 0
         for item in self._items:
             w = item.sizeHint()
             next_x = x + w.width() + self._spacing
-            if next_x - self._spacing > eff.right() and row_height > 0:
+            if next_x - self._spacing > eff.right() and current_row:
+                rows.append((list(current_row), row_height))
+                current_row = []
                 x = eff.x()
-                y = y + row_height + self._spacing
                 next_x = x + w.width() + self._spacing
                 row_height = 0
-            if not test_only:
-                item.setGeometry(QRect(QPoint(x, y), w))
+            current_row.append((item, x, w))
             x = next_x
             row_height = max(row_height, w.height())
-        return y + row_height - rect.y() + m.bottom()
+        if current_row:
+            rows.append((list(current_row), row_height))
+        y = eff.y()
+        for row_items, row_h in rows:
+            if not test_only:
+                for item, item_x, item_size in row_items:
+                    item_y = y + (row_h - item_size.height()) // 2
+                    item.setGeometry(QRect(QPoint(item_x, item_y), item_size))
+            y += row_h + self._spacing
+        return y - self._spacing - rect.y() + m.bottom()
