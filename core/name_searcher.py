@@ -84,18 +84,40 @@ def _is_path_in_dirs(file_path: str, include_dirs: list) -> bool:
             return True
     return False
 
+def _extract_pre_filter_pattern(pattern: str, mode: str) -> str:
+    if not pattern:
+        return ''
+    if mode == 'wildcard':
+        literal = pattern.replace('*', '').replace('?', '')
+        return literal if literal else ''
+    if mode == 'regex':
+        literals = re.findall(r'[a-zA-Z0-9_.\-]+', pattern)
+        cleaned = [l for l in literals if l.replace('.', '').replace('-', '').replace('_', '')]
+        return max(cleaned, key=len) if cleaned else ''
+    return pattern
+
+
+def _is_wildcard_match_all(pattern: str) -> bool:
+    cleaned = pattern.replace('*', '').replace('?', '').replace('.', '').strip()
+    return cleaned == ''
+
+
 def search_by_name(query: SearchQuery) -> List[Tuple[int, FileItem]]:
     db = DatabaseManager()
     pattern = query.name_query if query.has_name_query else ""
 
+    is_wildcard_all = (query.name_mode == 'wildcard' and _is_wildcard_match_all(pattern))
+
+    pre_filter_pattern = _extract_pre_filter_pattern(pattern, query.name_mode) if query.has_name_query else ""
+
     db_results = db.search_files(
-        pattern=pattern,
+        pattern=pre_filter_pattern,
         case_sensitive=query.name_case_sensitive,
         file_types=query.file_types if query.file_types else None,
         exclude_file_types=query.exclude_file_types if query.exclude_file_types else None,
         size_min=query.size_min,
         size_max=query.size_max,
-        max_results=query.max_results * 2
+        max_results=query.max_results * 3
     )
 
     results = []
@@ -107,22 +129,21 @@ def search_by_name(query: SearchQuery) -> List[Tuple[int, FileItem]]:
 
         if query.has_name_query:
             pat = query.name_query
-            if item.is_directory:
-                match_name = item.name
-            else:
-                match_name = os.path.splitext(item.name)[0]
+            match_name = item.name
 
-            if query.name_mode == 'exact':
+            if is_wildcard_all:
+                match = True
+            elif query.name_mode == 'exact':
                 match = (match_name == pat) if query.name_case_sensitive else (match_name.lower() == pat.lower())
             elif query.name_mode == 'wildcard':
                 match = wildcard_match(match_name, pat, query.name_case_sensitive)
             elif query.name_mode == 'regex':
                 match = regex_match(match_name, pat, query.name_case_sensitive)
             else:
-                match = True
+                match = fuzzy_match(match_name, pat, query.name_case_sensitive)
 
             if match:
-                score = _calculate_name_relevance(match_name, pat, query.name_case_sensitive)
+                score = _calculate_name_relevance(match_name, pat, query.name_case_sensitive) if not is_wildcard_all else 0
                 results.append((score, item))
         else:
             results.append((0, item))

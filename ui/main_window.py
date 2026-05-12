@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QStatusBar,
                              QPushButton, QCheckBox, QTreeWidget, QTreeWidgetItem,
                              QLineEdit, QFileDialog, QApplication,
                              QListWidget, QListWidgetItem, QScrollArea, QAbstractItemView,
-                             QTextEdit, QRadioButton, QButtonGroup)
+                             QTextEdit, QRadioButton, QButtonGroup, QGraphicsDropShadowEffect)
 from PySide6.QtCore import Qt, QThread, Signal, QTimer, QFileSystemWatcher, QPropertyAnimation, QEasingCurve, QRectF, QSize, QPointF, Property
 from PySide6.QtGui import QIcon, QAction, QPainter, QColor, QPen, QFont, QFontMetrics, QPixmap, QPolygonF
 from models.search_query import SearchQuery
@@ -50,25 +50,18 @@ class ModernMessageBox(ModernDialogBase):
         self._init_ui()
 
     def _init_ui(self):
+        icon_pixmap = self._create_icon_pixmap()
+
         def build_content(content_widget):
             layout = QVBoxLayout(content_widget)
             layout.setSpacing(DIALOG.CONTENT_SPACING)
             layout.setContentsMargins(DIALOG.PADDING, 4, DIALOG.PADDING, DIALOG.PADDING)
 
-            icon_label = QLabel()
-            icon_label.setFixedSize(48, 48)
-            icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            pixmap = self._create_icon_pixmap()
-            icon_label.setPixmap(pixmap)
-
             text_label = QLabel(self._text)
             text_label.setStyleSheet(dialog_body_style())
             text_label.setWordWrap(True)
 
-            content_row = QHBoxLayout()
-            content_row.setSpacing(DIALOG.CONTENT_SPACING)
-            content_row.addWidget(icon_label, 0, Qt.AlignmentFlag.AlignTop)
-            content_row.addLayout(self._build_text_column(text_label), 1)
+            layout.addWidget(text_label)
 
             btn_row = QHBoxLayout()
             btn_row.addStretch()
@@ -84,18 +77,10 @@ class ModernMessageBox(ModernDialogBase):
                 btn_row.addWidget(btn)
                 btn_row.addSpacing(DIALOG.BUTTON_SPACING)
 
-            layout.addLayout(content_row)
             layout.addSpacing(8)
             layout.addLayout(btn_row)
 
-        self._create_shadow_frame(build_content)
-
-    def _build_text_column(self, text_label):
-        col = QVBoxLayout()
-        col.setSpacing(6)
-        col.addWidget(text_label)
-        col.addStretch()
-        return col
+        self._create_shadow_frame(build_content, icon_pixmap=icon_pixmap)
 
     def _create_icon_pixmap(self) -> QPixmap:
         pixmap = QPixmap(48, 48)
@@ -448,7 +433,7 @@ class ScanWorker(QThread):
 
 
 class SearchWorker(QThread):
-    finished = Signal(object)
+    results_ready = Signal(object)
 
     def __init__(self, query, parent=None):
         super().__init__(parent)
@@ -458,9 +443,9 @@ class SearchWorker(QThread):
     def run(self):
         try:
             results = self._engine.search(self._query)
-            self.finished.emit(results)
+            self.results_ready.emit(results)
         except Exception:
-            self.finished.emit([])
+            self.results_ready.emit([])
 
     def cancel(self):
         self._engine.cancel()
@@ -651,6 +636,11 @@ class WelcomePage(QWidget):
     def _on_start_scan(self):
         if self._selected_dirs:
             self.scan_requested_with_dirs.emit(list(self._selected_dirs))
+
+    def reset(self):
+        self._selected_dirs = []
+        self._dir_input.clear()
+        self._update_dir_display()
 
 
 class ScanProgressDialog(QWidget):
@@ -992,6 +982,95 @@ class AnimatedRadioButton(QRadioButton):
         return self.minimumSizeHint()
 
 
+class _RoundedPanel(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._resize_edge_width = 6
+        self._hovering_edge = False
+        self._dragging = False
+        self._drag_start_x = 0
+        self._drag_start_sizes = []
+        self.setMouseTracking(True)
+
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setOffset(0, 0)
+        shadow.setBlurRadius(36)
+        shadow.setColor(QColor(0, 0, 0, 20))
+        self.setGraphicsEffect(shadow)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        r = RADIUS.LARGE
+        rect = QRectF(self.rect())
+
+        painter.setBrush(QColor(COLORS.BG_PRIMARY))
+        painter.setPen(QPen(QColor(COLORS.BORDER_DEFAULT), 1))
+        painter.drawRoundedRect(rect.adjusted(0.5, 0.5, -0.5, -0.5), r, r)
+
+        painter.end()
+
+    def _get_splitter(self):
+        splitter = self.parent()
+        if isinstance(splitter, QSplitter):
+            return splitter
+        return None
+
+    def mousePressEvent(self, event):
+        if (event.button() == Qt.MouseButton.LeftButton
+                and event.position().x() < self._resize_edge_width):
+            splitter = self._get_splitter()
+            if splitter:
+                self._dragging = True
+                self._drag_start_x = event.globalPosition().x()
+                self._drag_start_sizes = splitter.sizes()
+                event.accept()
+                return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._dragging:
+            splitter = self._get_splitter()
+            if splitter:
+                delta = self._drag_start_x - event.globalPosition().x()
+                my_index = splitter.indexOf(self)
+                new_width = max(self.minimumWidth(),
+                                self._drag_start_sizes[my_index] + delta)
+                total = sum(self._drag_start_sizes)
+                other_index = 1 - my_index
+                other_width = max(splitter.widget(other_index).minimumWidth(),
+                                  total - new_width)
+                if new_width + other_width <= total:
+                    splitter.setSizes([other_width, new_width]
+                                      if my_index == 1 else [new_width, other_width])
+            event.accept()
+            return
+        if event.position().x() < self._resize_edge_width:
+            if not self._hovering_edge:
+                self._hovering_edge = True
+                self.setCursor(Qt.CursorShape.SplitHCursor)
+        else:
+            if self._hovering_edge:
+                self._hovering_edge = False
+                self.setCursor(Qt.CursorShape.ArrowCursor)
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if self._dragging:
+            self._dragging = False
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def leaveEvent(self, event):
+        if not self._dragging:
+            if self._hovering_edge:
+                self._hovering_edge = False
+                self.setCursor(Qt.CursorShape.ArrowCursor)
+        super().leaveEvent(event)
+
+
 class CollapsibleSection(QWidget):
     def __init__(self, title: str, default_expanded: bool = True, parent=None):
         super().__init__(parent)
@@ -1015,7 +1094,7 @@ class CollapsibleSection(QWidget):
         self._header_widget.setStyleSheet(f"""
             QWidget#sectionHeader {{
                 background-color: {COLORS.BG_PRIMARY};
-                border-radius: {RADIUS.DEFAULT}px;
+                border-radius: {RADIUS.LARGE}px;
                 border: none;
             }}
             QWidget#sectionHeader:hover {{
@@ -1215,7 +1294,7 @@ class SearchScopePanel(QWidget):
 
         self._scope_collapsible = CollapsibleSection("指定搜索范围", default_expanded=True)
         scope_content = QWidget()
-        scope_content.setStyleSheet(f"QWidget {{ background-color: {COLORS.BG_PRIMARY}; border-radius: {RADIUS.DEFAULT}px; }}")
+        scope_content.setStyleSheet(f"QWidget {{ background-color: {COLORS.BG_PRIMARY}; border-radius: {RADIUS.LARGE}px; }}")
         scope_content_layout = QVBoxLayout()
         scope_content_layout.setContentsMargins(10, 6, 10, 6)
         scope_content_layout.setSpacing(4)
@@ -1291,7 +1370,7 @@ class SearchScopePanel(QWidget):
 
         self._manage_collapsible = CollapsibleSection("管理扫描路径", default_expanded=True)
         manage_content = QWidget()
-        manage_content.setStyleSheet(f"QWidget {{ background-color: {COLORS.BG_PRIMARY}; border-radius: {RADIUS.DEFAULT}px; }}")
+        manage_content.setStyleSheet(f"QWidget {{ background-color: {COLORS.BG_PRIMARY}; border-radius: {RADIUS.LARGE}px; }}")
         manage_content_layout = QVBoxLayout()
         manage_content_layout.setContentsMargins(10, 6, 10, 6)
         manage_content_layout.setSpacing(4)
@@ -1373,8 +1452,8 @@ class SearchScopePanel(QWidget):
 
         self.setLayout(self._main_layout)
         self.setStyleSheet(f"""
-            QWidget {{
-                background-color: {COLORS.BG_SECONDARY};
+            SearchScopePanel {{
+                background-color: transparent;
             }}
         """)
 
@@ -1544,8 +1623,20 @@ class SearchScopePanel(QWidget):
             selected = dialog.get_selected_dirs()
             unscanned = dialog.get_unscanned_dirs()
 
+            def _is_under_scanned_dir(path: str) -> bool:
+                norm_p = os.path.normcase(os.path.normpath(path))
+                for sd in self._scanned_dirs:
+                    norm_sd = os.path.normcase(os.path.normpath(sd))
+                    if norm_p == norm_sd or norm_p.startswith(norm_sd + os.sep):
+                        status = get_scan_status(sd)
+                        if status == SCAN_STATUS_COMPLETE:
+                            return True
+                return False
+
             incomplete_selected = []
             for d in selected:
+                if _is_under_scanned_dir(d):
+                    continue
                 status = get_scan_status(d)
                 if status is None or status in (SCAN_STATUS_INCOMPLETE, SCAN_STATUS_FAILED):
                     incomplete_selected.append(d)
@@ -1795,7 +1886,7 @@ class _ScopeSelectionDialog(ModernDialogBase):
         def build_content(content_widget):
             layout = QVBoxLayout(content_widget)
             layout.setSpacing(12)
-            layout.setContentsMargins(24, 4, 24, 20)
+            layout.setContentsMargins(DIALOG.PADDING, 4, DIALOG.PADDING, 20)
 
             desc = QLabel("FileFinder将在指定的搜索范围中进行搜索")
             desc.setStyleSheet(label_caption_style())
@@ -2408,21 +2499,21 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.search_bar)
 
         content_split = QSplitter(Qt.Orientation.Horizontal)
-        content_split.setContentsMargins(0, 0, 0, 0)
+        content_split.setContentsMargins(0, 8, 8, 8)
         content_split.setChildrenCollapsible(False)
 
         left_panel = QWidget()
-        left_panel.setMinimumWidth(480)
+        left_panel.setMinimumWidth(540)
         left_layout = QVBoxLayout()
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(0)
+        left_layout.setContentsMargins(8, 0, 8, 0)
+        left_layout.setSpacing(4)
 
-        left_layout.addWidget(self.search_bar.get_settings_widget())
-
-        settings_filter_separator = QFrame()
-        settings_filter_separator.setFixedHeight(1)
-        settings_filter_separator.setStyleSheet(f"background-color: {COLORS.BORDER_DEFAULT}; border: none;")
-        left_layout.addWidget(settings_filter_separator)
+        settings_wrapper = QWidget()
+        settings_wrapper_layout = QVBoxLayout(settings_wrapper)
+        settings_wrapper_layout.setContentsMargins(16, 0, 16, 0)
+        settings_wrapper_layout.setSpacing(0)
+        settings_wrapper_layout.addWidget(self.search_bar.get_settings_widget())
+        left_layout.addWidget(settings_wrapper)
 
         self.filter_bar = FilterBar()
         left_layout.addWidget(self.filter_bar)
@@ -2448,10 +2539,11 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(self.result_list, 1)
         left_panel.setLayout(left_layout)
 
-        right_panel = QWidget()
-        right_panel.setMinimumWidth(320)
+        right_panel = _RoundedPanel()
+        right_panel.setMinimumWidth(360)
+
         right_layout = QVBoxLayout()
-        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setContentsMargins(1, 1, 1, 1)
         right_layout.setSpacing(0)
 
         self._search_scope_panel = SearchScopePanel()
@@ -2468,8 +2560,15 @@ class MainWindow(QMainWindow):
         content_split.setStretchFactor(0, 3)
         content_split.setStretchFactor(1, 2)
         content_split.setSizes([660, 440])
-        content_split.setHandleWidth(3)
-        content_split.setStyleSheet(splitter_style())
+        content_split.setHandleWidth(4)
+        content_split.setStyleSheet(f"""
+            QSplitter::handle {{
+                background: transparent;
+            }}
+            QSplitter::handle:hover {{
+                background: transparent;
+            }}
+        """)
 
         layout.addWidget(content_split, 1)
 
@@ -2593,11 +2692,6 @@ class MainWindow(QMainWindow):
 
         reset_all_settings()
 
-        _styled_msg_box(
-            self, QMessageBox.Icon.Information,
-            "操作成功", "所有设置已恢复为默认值。\n应用将重置为首次启动状态。"
-        )
-
         self._all_results = []
         self._current_file_types = []
         self._exclude_known_types = False
@@ -2605,9 +2699,11 @@ class MainWindow(QMainWindow):
         self._is_first_launch = True
 
         self.result_list.clear_results()
-        self.preview_panel.clear()
+        self.preview_panel.clear_preview()
         self.filter_bar._reload_scope()
         self._search_scope_panel.reset()
+        self._search_scope_panel._reload_scope()
+        self._welcome_page.reset()
 
         self.search_bar.search_input.clear()
         self.search_bar._set_mode('name')
@@ -2616,8 +2712,15 @@ class MainWindow(QMainWindow):
         for key, btn in self.filter_bar.type_buttons.items():
             btn.setChecked(key == 'all')
         self.filter_bar._selected_category = 'all'
+        self.filter_bar._selected_sub_extensions = set()
+        self.filter_bar._sub_filter_widget.setVisible(False)
 
         self._switch_to_welcome()
+
+        _styled_msg_box(
+            self, QMessageBox.Icon.Information,
+            "操作成功", "所有设置已恢复为默认值。\n应用将重置为首次启动状态。"
+        )
 
     def _on_open_settings(self):
         dialog = SettingsDialog(self)
@@ -2630,7 +2733,7 @@ class MainWindow(QMainWindow):
             "关于 FileFinder",
             "FileFinder v1.0\n\n一款轻量级的本地文件搜索桌面工具\n"
             "帮助您通过文件名或文件内容快速定位电脑中的文件。"
-        ).exec()
+        )
 
     def _connect_signals(self):
         self._welcome_page.scan_requested_with_dirs.connect(self._start_scan_with_dirs)
@@ -2641,6 +2744,8 @@ class MainWindow(QMainWindow):
         self.result_list.result_selected.connect(self._on_result_selected)
         self.result_list.status_info_requested.connect(self._update_status_info)
         self.filter_bar.filter_changed.connect(self._on_filter_changed)
+        self.filter_bar.sort_changed.connect(self._on_sort_changed)
+        self.filter_bar.sort_order_changed.connect(self._on_sort_order_changed)
         self._search_scope_panel.scan_requested.connect(self._on_scan_requested)
 
     def _check_index_on_startup(self):
@@ -2674,6 +2779,8 @@ class MainWindow(QMainWindow):
         if scanned:
             self._search_scope_panel.set_scanned_dirs(scanned)
         self._search_scope_panel.update_scope_info(self._search_scope_panel.get_indexed_count())
+        if not self._all_results and self._search_scope_panel.get_indexed_count() > 0:
+            self._load_all_files()
 
     def _switch_to_scan_progress(self):
         self._scan_progress_page.reset_state()
@@ -2760,6 +2867,7 @@ class MainWindow(QMainWindow):
 
         self._hide_loading()
         QTimer.singleShot(800, self._switch_to_main)
+        QTimer.singleShot(1200, self._load_all_files)
 
     def _on_scan_error(self, err_msg: str):
         self._scan_progress_page.set_error(err_msg)
@@ -2796,6 +2904,51 @@ class MainWindow(QMainWindow):
         )
         if reply == QMessageBox.StandardButton.Yes:
             self._start_scan_with_dirs(unscanned_dirs)
+
+    def _load_all_files(self):
+        if self._search_worker and self._search_worker.isRunning():
+            return
+        from database.db_manager import DatabaseManager
+        db = DatabaseManager()
+        all_dirs = self._search_scope_panel.get_all_scanned_dirs()
+        if not all_dirs:
+            all_dirs = self._search_scope_panel.get_search_dirs()
+        self._selected_dirs = set(self._search_scope_panel.get_selected_dirs())
+
+        db_results = db.search_files(
+            pattern="",
+            case_sensitive=False,
+            max_results=get_max_results()
+        )
+
+        from models.file_item import FileItem
+        from models.search_result import SearchResult
+        from datetime import datetime
+        results = []
+        for row in db_results:
+            try:
+                item = FileItem(
+                    path=row["path"],
+                    name=row["name"],
+                    size=row["size"],
+                    modified_time=datetime.fromtimestamp(row["modified_time"]),
+                    extension=row["extension"] or "",
+                    is_directory=bool(row.get("is_directory", 0)),
+                    item_count=row.get("item_count", 0)
+                )
+                if all_dirs and not any(
+                    os.path.normcase(os.path.normpath(item.path)).startswith(
+                        os.path.normcase(os.path.normpath(d)) + os.sep
+                    ) or os.path.normcase(os.path.normpath(item.path)) == os.path.normcase(os.path.normpath(d))
+                    for d in all_dirs
+                ):
+                    continue
+                results.append(SearchResult(file_item=item, match_reason='name', name_match_score=0))
+            except Exception:
+                continue
+
+        self._all_results = results
+        self._apply_current_filter()
 
     def _on_search(self, name_query, content_query):
         if not name_query.strip() and not content_query.strip():
@@ -2852,7 +3005,7 @@ class MainWindow(QMainWindow):
         self.result_list.show_search_progress("正在搜索...")
 
         self._search_worker = SearchWorker(query)
-        self._search_worker.finished.connect(self._on_search_finished)
+        self._search_worker.results_ready.connect(self._on_search_finished)
         self._search_worker.start()
 
     def _on_search_finished(self, results):
@@ -2881,9 +3034,9 @@ class MainWindow(QMainWindow):
         elif self.filter_bar.get_selected_category() == 'folder':
             filtered = [r for r in filtered if r.file_item.is_directory]
 
-        self.result_list.clear_results()
-        for result in filtered:
-            self.result_list.add_result(result)
+        filtered = self._sort_results(filtered)
+
+        self.result_list.set_results(filtered)
 
         count = len(filtered)
         if count == 0:
@@ -2914,7 +3067,7 @@ class MainWindow(QMainWindow):
                   self.status_separator3, self.status_path]:
             w.setVisible(True)
 
-    def _on_filter_changed(self, category):
+    def _on_filter_changed(self, category, sub_extensions=None):
         from models.file_item import FILE_TYPE_MAP
         self._current_file_types = []
         self._exclude_known_types = False
@@ -2923,17 +3076,54 @@ class MainWindow(QMainWindow):
         elif category == 'folder':
             pass
         elif category != 'all':
-            for ext, ftype in FILE_TYPE_MAP.items():
-                if ftype == category:
-                    self._current_file_types.append(ext)
+            if sub_extensions:
+                self._current_file_types = list(sub_extensions)
+            else:
+                for ext, ftype in FILE_TYPE_MAP.items():
+                    if ftype == category:
+                        self._current_file_types.append(ext)
 
-        if self._all_results:
+        if self._all_results and len(self._all_results) > 200:
+            self.result_list.show_search_progress("正在筛选...")
+            if hasattr(self, '_filter_timer'):
+                self._filter_timer.stop()
+            else:
+                self._filter_timer = QTimer(self)
+                self._filter_timer.setSingleShot(True)
+                self._filter_timer.timeout.connect(self._apply_current_filter)
+            self._filter_timer.start(50)
+        elif self._all_results:
             self._apply_current_filter()
 
     def _on_scope_changed(self, dirs):
         self._selected_dirs = set(dirs)
         if self._all_results:
             self._apply_current_filter()
+
+    def _on_sort_changed(self, mode):
+        if self._all_results:
+            self._apply_current_filter()
+
+    def _on_sort_order_changed(self, ascending):
+        if self._all_results:
+            self._apply_current_filter()
+
+    def _sort_results(self, results):
+        sort_mode = self.filter_bar.get_sort_mode()
+        ascending = self.filter_bar.is_sort_ascending()
+
+        def _sort_key(result):
+            item = result.file_item
+            if sort_mode == 'name':
+                return item.name.lower()
+            elif sort_mode == 'modified':
+                return item.modified_time.timestamp() if item.modified_time else 0
+            elif sort_mode == 'size':
+                return item.size
+            else:
+                return result.score
+
+        return sorted(results, key=_sort_key, reverse=not ascending)
 
     def _is_path_in_selected_dirs(self, file_path: str) -> bool:
         if not self._selected_dirs:

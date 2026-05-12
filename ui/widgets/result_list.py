@@ -3,7 +3,7 @@ from PySide6.QtWidgets import (QListWidget, QListWidgetItem, QWidget, QVBoxLayou
                              QLabel, QHBoxLayout, QFrame, QMenu, QApplication,
                              QAbstractItemView, QProgressBar, QStackedWidget, QSizePolicy)
 from PySide6.QtGui import QFont, QIcon, QFontMetrics, QDrag, QPixmap, QPainter, QColor, QRegion, QPainterPath, QPen
-from PySide6.QtCore import Qt, Signal, QSize, QMimeData, QUrl, QPoint, QRectF, QPropertyAnimation, QEasingCurve
+from PySide6.QtCore import Qt, Signal, QSize, QMimeData, QUrl, QPoint, QRectF, QPropertyAnimation, QEasingCurve, QTimer
 from models import SearchResult
 from ..style_constants import COLORS, FONT, RADIUS, BTN
 from ..style_manager import (
@@ -450,6 +450,38 @@ class ResultListWidget(QListWidget):
         self._anchor_index = -1
         self.clear()
 
+    def set_results(self, results):
+        self._pending_results = list(results)
+        self._pending_index = 0
+        self._results.clear()
+        self._item_widgets.clear()
+        self._anchor_index = -1
+        self.clear()
+        self._batch_add()
+
+    def _batch_add(self):
+        if not hasattr(self, '_pending_results') or self._pending_index >= len(self._pending_results):
+            return
+
+        batch_size = 50
+        end = min(self._pending_index + batch_size, len(self._pending_results))
+        self.setUpdatesEnabled(False)
+        for i in range(self._pending_index, end):
+            result = self._pending_results[i]
+            idx = len(self._results)
+            self._results.append(result)
+            item = QListWidgetItem(self)
+            widget = ResultItemWidget(result)
+            item.setSizeHint(widget.sizeHint())
+            self.setItemWidget(item, widget)
+            self._item_widgets[idx] = widget
+        self.setUpdatesEnabled(True)
+        self.viewport().update()
+        self._pending_index = end
+
+        if self._pending_index < len(self._pending_results):
+            QTimer.singleShot(0, self._batch_add)
+
     def get_selected_result(self):
         items = self.selectedItems()
         if items:
@@ -610,16 +642,73 @@ class ResultListWidget(QListWidget):
         mime_data.setUrls(urls)
         drag.setMimeData(mime_data)
 
-        pixmap = QPixmap(160, 40)
-        pixmap.fill(QColor(COLORS.BRAND))
-        painter = QPainter(pixmap)
-        painter.setPen(QColor(COLORS.BG_PRIMARY))
-        font = QFont()
-        font.setPointSize(FONT.MICRO_PT)
-        painter.setFont(font)
-        text = results[0].file_item.name if len(results) == 1 else f"{len(results)} 个文件"
-        painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, text)
-        painter.end()
-        drag.setPixmap(pixmap)
-        drag.setHotSpot(QPoint(80, 20))
+        if len(results) == 1:
+            result = results[0]
+            icon_name = self._get_icon_for_result(result)
+            icon = QIcon(f"icons/{icon_name}")
+            name = result.file_item.name
+
+            pm_w, pm_h = 220, 52
+            pixmap = QPixmap(pm_w, pm_h)
+            pixmap.fill(Qt.GlobalColor.transparent)
+            painter = QPainter(pixmap)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(0, 0, 0, 20))
+            painter.drawRoundedRect(2, 3, pm_w - 2, pm_h - 3, 10, 10)
+
+            painter.setBrush(QColor(COLORS.BG_PRIMARY))
+            painter.setPen(QPen(QColor(COLORS.BORDER_DEFAULT), 1))
+            painter.drawRoundedRect(0, 0, pm_w - 2, pm_h - 3, 10, 10)
+
+            icon_pixmap = icon.pixmap(QSize(28, 28))
+            painter.drawPixmap(10, (pm_h - 3 - 28) // 2, icon_pixmap)
+
+            painter.setPen(QColor(COLORS.TEXT_PRIMARY))
+            font = QFont()
+            font.setPointSize(FONT.BODY_PT)
+            font.setBold(True)
+            painter.setFont(font)
+            fm = QFontMetrics(font)
+            max_text_w = pm_w - 56
+            elided = fm.elidedText(name, Qt.TextElideMode.ElideRight, max_text_w)
+            painter.drawText(QRectF(44, 0, max_text_w, pm_h - 3), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, elided)
+
+            painter.end()
+            drag.setPixmap(pixmap)
+            drag.setHotSpot(QPoint(20, 26))
+        else:
+            count = len(results)
+            pm_w, pm_h = 140, 44
+            pixmap = QPixmap(pm_w, pm_h)
+            pixmap.fill(Qt.GlobalColor.transparent)
+            painter = QPainter(pixmap)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(0, 0, 0, 20))
+            painter.drawRoundedRect(2, 3, pm_w - 2, pm_h - 3, 10, 10)
+
+            painter.setBrush(QColor(COLORS.BRAND))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawRoundedRect(0, 0, pm_w - 2, pm_h - 3, 10, 10)
+
+            painter.setPen(QColor(COLORS.BG_PRIMARY))
+            font = QFont()
+            font.setPointSize(FONT.BODY_PT)
+            font.setBold(True)
+            painter.setFont(font)
+            painter.drawText(QRectF(0, 0, pm_w - 2, pm_h - 3), Qt.AlignmentFlag.AlignCenter, f"{count} 个文件")
+            painter.end()
+            drag.setPixmap(pixmap)
+            drag.setHotSpot(QPoint(70, 22))
+
         drag.exec(Qt.DropAction.CopyAction)
+
+    @staticmethod
+    def _get_icon_for_result(result: SearchResult) -> str:
+        if result.file_item.is_directory:
+            return 'doctype/Folder.svg'
+        ext = result.file_item.extension.lower()
+        return FILE_ICON_MAP.get(ext, 'doctype/File.svg')

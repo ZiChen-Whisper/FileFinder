@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
                              QGroupBox, QComboBox, QFrame, QMessageBox)
 from PySide6.QtGui import QFont, QPixmap, QPainter, QColor, QPen, QPolygonF
-from PySide6.QtCore import Qt, QRectF, QPointF
+from PySide6.QtCore import Qt, QRectF, QPointF, Signal
 from ..style_constants import COLORS, FONT, RADIUS, BTN, DIALOG
 from ..modern_dialog import ModernDialogBase
 from ..style_manager import (
@@ -21,25 +21,16 @@ class _ModernMessageBox(ModernDialogBase):
         self._init_ui()
 
     def _init_ui(self):
+        icon_pixmap = self._create_icon_pixmap()
+
         def build_content(content_widget):
             layout = QVBoxLayout(content_widget)
             layout.setSpacing(DIALOG.CONTENT_SPACING)
             layout.setContentsMargins(DIALOG.PADDING, 4, DIALOG.PADDING, DIALOG.PADDING)
-            icon_label = QLabel()
-            icon_label.setFixedSize(48, 48)
-            icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            icon_label.setPixmap(self._create_icon_pixmap())
             text_label = QLabel(self._text)
             text_label.setStyleSheet(dialog_body_style())
             text_label.setWordWrap(True)
-            content_row = QHBoxLayout()
-            content_row.setSpacing(DIALOG.CONTENT_SPACING)
-            content_row.addWidget(icon_label, 0, Qt.AlignmentFlag.AlignTop)
-            col = QVBoxLayout()
-            col.setSpacing(6)
-            col.addWidget(text_label)
-            col.addStretch()
-            content_row.addLayout(col, 1)
+            layout.addWidget(text_label)
             btn_row = QHBoxLayout()
             btn_row.addStretch()
             for key, (label, style_type) in self._buttons.items():
@@ -52,11 +43,10 @@ class _ModernMessageBox(ModernDialogBase):
                 btn.clicked.connect(lambda checked, k=key: self._on_button(k))
                 btn_row.addWidget(btn)
                 btn_row.addSpacing(DIALOG.BUTTON_SPACING)
-            layout.addLayout(content_row)
             layout.addSpacing(8)
             layout.addLayout(btn_row)
 
-        self._create_shadow_frame(build_content)
+        self._create_shadow_frame(build_content, icon_pixmap=icon_pixmap)
 
     def _create_icon_pixmap(self) -> QPixmap:
         pixmap = QPixmap(48, 48)
@@ -139,6 +129,8 @@ def _styled_msg_box(parent, icon, title, text, buttons=None):
 
 
 class SettingsDialog(ModernDialogBase):
+    reset_requested = Signal()
+
     def __init__(self, parent=None):
         super().__init__(parent, title="设置", min_width=520, min_height=480, resizable=True)
         self._init_ui()
@@ -279,9 +271,5 @@ class SettingsDialog(ModernDialogBase):
             self.shortcut_combo.setCurrentIndex(0)
             self.max_results_combo.setCurrentIndex(2)
             self.max_file_size_combo.setCurrentIndex(2)
-            _styled_msg_box(
-                self,
-                QMessageBox.Icon.Information,
-                "重置完成",
-                "所有设置已恢复为默认值。"
-            )
+            self.reset_requested.emit()
+            self.accept()

@@ -55,6 +55,63 @@ FILE_TYPE_CATEGORIES = {
     'other': '其他'
 }
 
+FILE_TYPE_SUBCATEGORIES = {
+    'document': [
+        ('all', '全部', TEXT_EXTENSIONS | DOCUMENT_EXTENSIONS),
+        ('text', '文本', TEXT_EXTENSIONS),
+        ('pdf', 'PDF', {'.pdf'}),
+        ('word', 'Word', {'.docx', '.doc'}),
+        ('excel', 'Excel', {'.xlsx', '.xls'}),
+        ('ppt', 'PPT', {'.pptx', '.ppt'}),
+        ('ebook', '电子书', {'.epub', '.rtf'}),
+    ],
+    'code': [
+        ('all', '全部', CODE_EXTENSIONS),
+        ('python', 'Python', {'.py'}),
+        ('javascript', 'JS/TS', {'.js', '.ts'}),
+        ('html_css', 'HTML/CSS', {'.html', '.css'}),
+        ('java', 'Java', {'.java'}),
+        ('c_cpp', 'C/C++', {'.c', '.cpp', '.h'}),
+        ('go', 'Go', {'.go'}),
+        ('rust', 'Rust', {'.rs'}),
+        ('ruby', 'Ruby', {'.rb'}),
+        ('php', 'PHP', {'.php'}),
+        ('shell', 'Shell', {'.sh', '.bat', '.ps1'}),
+        ('sql', 'SQL', {'.sql'}),
+    ],
+    'image': [
+        ('all', '全部', IMAGE_EXTENSIONS),
+        ('jpg', 'JPG', {'.jpg', '.jpeg'}),
+        ('png', 'PNG', {'.png'}),
+        ('gif', 'GIF', {'.gif'}),
+        ('bmp', 'BMP', {'.bmp'}),
+        ('svg', 'SVG', {'.svg'}),
+        ('icon', '图标', {'.ico', '.tiff'}),
+    ],
+    'video': [
+        ('all', '全部', VIDEO_EXTENSIONS),
+        ('mp4', 'MP4', {'.mp4'}),
+        ('mkv', 'MKV', {'.mkv'}),
+        ('avi', 'AVI', {'.avi'}),
+        ('mov', 'MOV', {'.mov'}),
+        ('other_video', '其他', {'.wmv', '.flv'}),
+    ],
+    'audio': [
+        ('all', '全部', AUDIO_EXTENSIONS),
+        ('mp3', 'MP3', {'.mp3'}),
+        ('wav', 'WAV', {'.wav'}),
+        ('flac', 'FLAC', {'.flac'}),
+        ('other_audio', '其他', {'.aac', '.ogg', '.wma'}),
+    ],
+    'archive': [
+        ('all', '全部', ARCHIVE_EXTENSIONS),
+        ('zip', 'ZIP', {'.zip'}),
+        ('rar', 'RAR', {'.rar'}),
+        ('7z', '7Z', {'.7z'}),
+        ('tar', 'TAR', {'.tar', '.gz', '.bz2'}),
+    ],
+}
+
 def get_category_extensions(category: str) -> set:
     if category == 'document':
         return TEXT_EXTENSIONS | DOCUMENT_EXTENSIONS

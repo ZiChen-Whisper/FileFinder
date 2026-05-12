@@ -3,10 +3,10 @@ from PySide6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QPushButton,
                              QLabel, QDialog, QListWidget, QListWidgetItem,
                              QMessageBox, QProgressBar, QSizePolicy, QLineEdit,
                              QFileDialog, QFrame, QApplication, QRadioButton,
-                             QButtonGroup, QComboBox)
+                             QButtonGroup, QComboBox, QScrollArea)
 from PySide6.QtCore import Signal, Qt, QPropertyAnimation, QEasingCurve, QSize, QPointF, QRectF, Property
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QPen, QFont, QFontMetrics, QPolygonF
-from constants import FILE_TYPE_CATEGORIES
+from constants import FILE_TYPE_CATEGORIES, FILE_TYPE_SUBCATEGORIES
 from utils.path_helper import get_all_drives, get_user_directories, normalize_path
 from database.db_manager import DatabaseManager
 from ..style_constants import COLORS, FONT, RADIUS, BTN, DIALOG, TRANSITION
@@ -141,25 +141,16 @@ class _ModernMessageBox(ModernDialogBase):
         self._init_ui()
 
     def _init_ui(self):
+        icon_pixmap = self._create_icon_pixmap()
+
         def build_content(content_widget):
             layout = QVBoxLayout(content_widget)
             layout.setSpacing(DIALOG.CONTENT_SPACING)
             layout.setContentsMargins(DIALOG.PADDING, 4, DIALOG.PADDING, DIALOG.PADDING)
-            icon_label = QLabel()
-            icon_label.setFixedSize(48, 48)
-            icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            icon_label.setPixmap(self._create_icon_pixmap())
             text_label = QLabel(self._text)
             text_label.setStyleSheet(dialog_body_style())
             text_label.setWordWrap(True)
-            content_row = QHBoxLayout()
-            content_row.setSpacing(DIALOG.CONTENT_SPACING)
-            content_row.addWidget(icon_label, 0, Qt.AlignmentFlag.AlignTop)
-            col = QVBoxLayout()
-            col.setSpacing(6)
-            col.addWidget(text_label)
-            col.addStretch()
-            content_row.addLayout(col, 1)
+            layout.addWidget(text_label)
             btn_row = QHBoxLayout()
             btn_row.addStretch()
             for key, (label, style_type) in self._buttons.items():
@@ -172,11 +163,10 @@ class _ModernMessageBox(ModernDialogBase):
                 btn.clicked.connect(lambda checked, k=key: self._on_button(k))
                 btn_row.addWidget(btn)
                 btn_row.addSpacing(DIALOG.BUTTON_SPACING)
-            layout.addLayout(content_row)
             layout.addSpacing(8)
             layout.addLayout(btn_row)
 
-        self._create_shadow_frame(build_content)
+        self._create_shadow_frame(build_content, icon_pixmap=icon_pixmap)
 
     def _create_icon_pixmap(self) -> QPixmap:
         pixmap = QPixmap(48, 48)
@@ -362,7 +352,7 @@ class SearchScopeDialog(ModernDialogBase):
         def build_content(content_widget):
             layout = QVBoxLayout(content_widget)
             layout.setSpacing(12)
-            layout.setContentsMargins(20, 4, 20, 20)
+            layout.setContentsMargins(DIALOG.PADDING, 4, DIALOG.PADDING, 20)
 
             desc = QLabel("管理要扫描的目录路径。添加/移除目录后需要重新扫描。")
             desc.setStyleSheet(label_caption_style())
@@ -589,8 +579,134 @@ class DirListWidget(QListWidget):
         self._hovered_item = None
 
 
+class _SubCategorySlider(QWidget):
+    sub_selected = Signal(str, set)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._items = []
+        self._selected_index = 0
+        self._slider_pos = 0.0
+        self._hovered_segment = -1
+        self.setFixedHeight(24)
+        self._slider_anim = QPropertyAnimation(self, b"slider_pos")
+        self._slider_anim.setDuration(200)
+        self._slider_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setMouseTracking(True)
+
+    def get_slider_pos(self):
+        return self._slider_pos
+
+    def set_slider_pos(self, pos):
+        self._slider_pos = pos
+        self.update()
+
+    slider_pos = Property(float, get_slider_pos, set_slider_pos)
+
+    def set_items(self, items):
+        self._items = items
+        self._selected_index = 0
+        self._slider_pos = 0.0
+        self._hovered_segment = -1
+        self.update()
+        self.sub_selected.emit('all', items[0][2] if items else set())
+
+    def _on_segment_clicked(self, index):
+        if index == self._selected_index:
+            return
+        self._selected_index = index
+        self._slider_anim.stop()
+        self._slider_anim.setStartValue(self._slider_pos)
+        self._slider_anim.setEndValue(float(index))
+        self._slider_anim.start()
+        if self._items:
+            _, _, extensions = self._items[index]
+            self.sub_selected.emit(self._items[index][0], extensions)
+
+    def minimumSizeHint(self):
+        fm = QFontMetrics(QFont("Microsoft YaHei", FONT.MICRO_PT - 1))
+        w = 0
+        for item in self._items:
+            w += fm.horizontalAdvance(item[1]) + 16
+        return QSize(w + 8, 24)
+
+    def sizeHint(self):
+        return self.minimumSizeHint()
+
+    def mouseMoveEvent(self, event):
+        if not self._items:
+            return
+        seg_w = self.width() / len(self._items)
+        idx = int(event.position().x() / seg_w)
+        idx = max(0, min(idx, len(self._items) - 1))
+        if idx != self._hovered_segment:
+            self._hovered_segment = idx
+            self.update()
+        super().mouseMoveEvent(event)
+
+    def leaveEvent(self, event):
+        self._hovered_segment = -1
+        self.update()
+        super().leaveEvent(event)
+
+    def paintEvent(self, event):
+        if not self._items:
+            return
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        w = self.width()
+        h = self.height()
+        r = RADIUS.SMALL
+
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(COLORS.BG_SECONDARY))
+        painter.drawRoundedRect(QRectF(0, 0, w, h), r, r)
+
+        painter.setPen(QPen(QColor(COLORS.BORDER_DEFAULT), 1))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRoundedRect(QRectF(0, 0, w, h), r, r)
+
+        seg_w = w / len(self._items)
+        slider_x = self._slider_pos * seg_w + 2
+        slider_w = seg_w - 4
+        slider_h = h - 4
+        slider_y = 2
+        slider_r = max(r - 1, 2)
+
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(COLORS.BRAND))
+        painter.drawRoundedRect(QRectF(slider_x, slider_y, slider_w, slider_h), slider_r, slider_r)
+
+        font = QFont()
+        font.setPointSize(FONT.MICRO_PT - 1)
+        font.setWeight(QFont.Weight.Normal)
+        painter.setFont(font)
+
+        for i, item in enumerate(self._items):
+            label = item[1]
+            if i == self._selected_index:
+                painter.setPen(QColor(COLORS.BG_PRIMARY))
+            elif i == self._hovered_segment:
+                painter.setPen(QColor(COLORS.TEXT_PRIMARY))
+            else:
+                painter.setPen(QColor(COLORS.TEXT_TERTIARY))
+            painter.drawText(QRectF(seg_w * i, 0, seg_w, h), Qt.AlignmentFlag.AlignCenter, label)
+
+        painter.end()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton and self._items:
+            seg_w = self.width() / len(self._items)
+            idx = int(event.position().x() / seg_w)
+            idx = max(0, min(idx, len(self._items) - 1))
+            self._on_segment_clicked(idx)
+        super().mousePressEvent(event)
+
+
 class FilterBar(QWidget):
-    filter_changed = Signal(str)
+    filter_changed = Signal(str, set)
     scope_changed = Signal(list)
     scan_requested = Signal()
     sort_changed = Signal(str)
@@ -606,6 +722,7 @@ class FilterBar(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._selected_category = 'all'
+        self._selected_sub_extensions = set()
         self._search_dirs = []
         self._scanned_dirs = []
         self._indexed_count = 0
@@ -644,13 +761,25 @@ class FilterBar(QWidget):
         flow_widget.setLayout(flow)
         flow_widget.setStyleSheet("QWidget { background: transparent; }")
 
+        self._sub_filter_widget = QWidget()
+        self._sub_filter_widget.setStyleSheet("QWidget { background: transparent; }")
+        sub_filter_layout = QVBoxLayout(self._sub_filter_widget)
+        sub_filter_layout.setContentsMargins(0, 2, 0, 2)
+        sub_filter_layout.setSpacing(0)
+
+        self._sub_slider = _SubCategorySlider()
+        self._sub_slider.sub_selected.connect(self._on_sub_clicked)
+        sub_filter_layout.addWidget(self._sub_slider)
+
+        self._sub_filter_widget.setVisible(False)
+
         sort_card = QFrame()
         sort_card.setObjectName("sortCard")
         sort_card.setStyleSheet(f"""
             QFrame#sortCard {{
                 background-color: {COLORS.BG_PRIMARY};
                 border: 1px solid {COLORS.BORDER_DEFAULT};
-                border-radius: {BTN.BORDER_RADIUS}px;
+                border-radius: {RADIUS.LARGE}px;
                 padding: 6px 10px;
             }}
         """)
@@ -706,6 +835,7 @@ class FilterBar(QWidget):
         sort_card_layout.addWidget(self._sort_order_btn)
 
         main_layout.addWidget(flow_widget)
+        main_layout.addWidget(self._sub_filter_widget)
         main_layout.addWidget(sort_card)
         self.setLayout(main_layout)
         self.setStyleSheet(f"""
@@ -714,11 +844,31 @@ class FilterBar(QWidget):
             }}
         """)
 
+    def _build_sub_buttons(self, category: str):
+        subcats = FILE_TYPE_SUBCATEGORIES.get(category, [])
+        if not subcats:
+            self._sub_filter_widget.setVisible(False)
+            return
+        self._sub_filter_widget.setVisible(True)
+        self._sub_slider.set_items(subcats)
+
     def _on_type_clicked(self, category):
         self._selected_category = category
         for key, btn in self.type_buttons.items():
             btn.setChecked(key == category)
-        self.filter_changed.emit(category)
+
+        if category in FILE_TYPE_SUBCATEGORIES:
+            self._build_sub_buttons(category)
+            self._selected_sub_extensions = set()
+            self.filter_changed.emit(category, set())
+        else:
+            self._sub_filter_widget.setVisible(False)
+            self._selected_sub_extensions = set()
+            self.filter_changed.emit(category, set())
+
+    def _on_sub_clicked(self, sub_key: str, extensions: set):
+        self._selected_sub_extensions = extensions
+        self.filter_changed.emit(self._selected_category, extensions)
 
     def _on_sort_clicked(self, mode):
         self._sort_mode = mode
@@ -734,6 +884,9 @@ class FilterBar(QWidget):
 
     def get_selected_category(self):
         return self._selected_category
+
+    def get_selected_sub_extensions(self):
+        return self._selected_sub_extensions
 
     def get_sort_mode(self):
         return self._sort_mode

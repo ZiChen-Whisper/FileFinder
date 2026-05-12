@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import (QWidget, QLineEdit, QHBoxLayout, QVBoxLayout,
                              QCheckBox, QPushButton, QLabel, QRadioButton,
-                             QComboBox, QDialog, QSizePolicy, QStyleOptionButton)
+                             QDialog, QSizePolicy, QStyleOptionButton, QFrame)
 from PySide6.QtCore import (Signal, Qt, QPropertyAnimation, QEasingCurve, QSize,
                            QTimer, QRectF, Property, QPoint, QParallelAnimationGroup)
 from PySide6.QtGui import (QFont, QFontMetrics, QIcon, QPainter, QPen, QColor,
@@ -9,13 +9,12 @@ from PySide6.QtGui import (QFont, QFontMetrics, QIcon, QPainter, QPen, QColor,
 from constants import SEARCH_DEBOUNCE_MS
 from utils.thread_helper import Debouncer
 from utils.flow_layout import FlowLayout
-from ..style_constants import COLORS, FONT, RADIUS, BTN, TRANSITION
+from ..style_constants import COLORS, FONT, RADIUS, BTN, DIALOG, TRANSITION
 from ..modern_dialog import ModernDialogBase
 from ..style_manager import (
     search_input_style, search_button_style, radio_button_style,
     dialog_frame_style, dialog_title_style,
     button_primary, label_caption_style, label_micro_style,
-    combo_box_style,
 )
 
 
@@ -129,6 +128,143 @@ class AnimatedRadioButton(QRadioButton):
         return self.minimumSizeHint()
 
 
+class MatchModeSlider(QWidget):
+    mode_changed = Signal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._modes = ['fuzzy', 'exact', 'wildcard', 'regex']
+        self._labels = ['模糊', '精确', '通配符', '正则']
+        self._current_index = 0
+        self._slider_pos = 0.0
+        self._hovered_segment = -1
+        self.setFixedHeight(28)
+        self._slider_anim = QPropertyAnimation(self, b"slider_pos")
+        self._slider_anim.setDuration(200)
+        self._slider_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.setMouseTracking(True)
+
+    def get_slider_pos(self):
+        return self._slider_pos
+
+    def set_slider_pos(self, pos):
+        self._slider_pos = pos
+        self.update()
+
+    slider_pos = Property(float, get_slider_pos, set_slider_pos)
+
+    def set_current_index(self, index: int):
+        if index == self._current_index:
+            return
+        self._current_index = index
+        self._slider_anim.stop()
+        self._slider_anim.setStartValue(self._slider_pos)
+        self._slider_anim.setEndValue(float(index))
+        self._slider_anim.start()
+        self.mode_changed.emit(self._modes[index])
+
+    def current_index(self) -> int:
+        return self._current_index
+
+    def current_mode(self) -> str:
+        return self._modes[self._current_index]
+
+    def set_mode(self, mode: str):
+        if mode in self._modes:
+            idx = self._modes.index(mode)
+            if idx != self._current_index:
+                self._current_index = idx
+                self._slider_anim.stop()
+                self._slider_anim.setStartValue(self._slider_pos)
+                self._slider_anim.setEndValue(float(idx))
+                self._slider_anim.start()
+
+    def minimumSizeHint(self):
+        fm = QFontMetrics(QFont("Microsoft YaHei", FONT.MICRO_PT))
+        w = 0
+        for s in self._labels:
+            w += fm.horizontalAdvance(s) + 24
+        return QSize(w + 8, 28)
+
+    def sizeHint(self):
+        return self.minimumSizeHint()
+
+    def mouseMoveEvent(self, event):
+        seg_w = self.width() / len(self._labels)
+        idx = int(event.position().x() / seg_w)
+        idx = max(0, min(idx, len(self._labels) - 1))
+        if idx != self._hovered_segment:
+            self._hovered_segment = idx
+            self.update()
+        super().mouseMoveEvent(event)
+
+    def leaveEvent(self, event):
+        self._hovered_segment = -1
+        self.update()
+        super().leaveEvent(event)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        w = self.width()
+        h = self.height()
+        r = RADIUS.DEFAULT
+
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(COLORS.BG_SECONDARY))
+        painter.drawRoundedRect(QRectF(0, 0, w, h), r, r)
+
+        painter.setPen(QPen(QColor(COLORS.BORDER_DEFAULT), 1))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRoundedRect(QRectF(0, 0, w, h), r, r)
+
+        seg_w = w / len(self._labels)
+        slider_x = self._slider_pos * seg_w + 2
+        slider_w = seg_w - 4
+        slider_h = h - 4
+        slider_y = 2
+        slider_r = max(r - 2, 2)
+
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(COLORS.BRAND))
+        painter.drawRoundedRect(QRectF(slider_x, slider_y, slider_w, slider_h), slider_r, slider_r)
+
+        font = QFont()
+        font.setPointSize(FONT.MICRO_PT)
+        font.setWeight(QFont.Weight.Medium)
+        painter.setFont(font)
+
+        for i, seg in enumerate(self._labels):
+            if i == self._current_index:
+                painter.setPen(QColor(COLORS.BG_PRIMARY))
+                font.setBold(True)
+                painter.setFont(font)
+            elif i == self._hovered_segment:
+                painter.setPen(QColor(COLORS.TEXT_PRIMARY))
+                font.setBold(False)
+                font.setWeight(QFont.Weight.Medium)
+                painter.setFont(font)
+            else:
+                painter.setPen(QColor(COLORS.TEXT_TERTIARY))
+                font.setBold(False)
+                font.setWeight(QFont.Weight.Medium)
+                painter.setFont(font)
+            painter.drawText(QRectF(seg_w * i, 0, seg_w, h), Qt.AlignmentFlag.AlignCenter, seg)
+
+        painter.end()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            seg_w = self.width() / len(self._labels)
+            idx = int(event.position().x() / seg_w)
+            idx = max(0, min(idx, len(self._labels) - 1))
+            self.set_current_index(idx)
+        super().mousePressEvent(event)
+
+
 class SegmentedControl(QWidget):
     mode_changed = Signal(str)
 
@@ -138,7 +274,7 @@ class SegmentedControl(QWidget):
         self._current_index = 0
         self._slider_pos = 0.0
         self._hovered_segment = -1
-        self.setFixedHeight(30)
+        self.setFixedHeight(28)
         self._slider_anim = QPropertyAnimation(self, b"slider_pos")
         self._slider_anim.setDuration(200)
         self._slider_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
@@ -169,11 +305,11 @@ class SegmentedControl(QWidget):
         return self._current_index
 
     def minimumSizeHint(self):
-        fm = QFontMetrics(QFont("Microsoft YaHei", 11))
+        fm = QFontMetrics(QFont("Microsoft YaHei", FONT.MICRO_PT))
         w = 0
         for s in self._segments:
             w += fm.horizontalAdvance(s) + 32
-        return QSize(w + 8, 30)
+        return QSize(w + 8, 28)
 
     def sizeHint(self):
         return self.minimumSizeHint()
@@ -198,7 +334,7 @@ class SegmentedControl(QWidget):
 
         w = self.width()
         h = self.height()
-        r = BTN.BORDER_RADIUS
+        r = RADIUS.DEFAULT
 
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QColor(COLORS.BG_SECONDARY))
@@ -252,11 +388,11 @@ class SegmentedControl(QWidget):
         super().mousePressEvent(event)
 
 
-class SettingsArea(QWidget):
+class SettingsArea(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._main_vlayout = QVBoxLayout(self)
-        self._main_vlayout.setContentsMargins(16, 6, 16, 6)
+        self._main_vlayout.setContentsMargins(0, 0, 0, 0)
         self._main_vlayout.setSpacing(2)
 
         self._flow_layout = FlowLayout(spacing=10)
@@ -432,7 +568,7 @@ class AnimatedCheckBox(QCheckBox):
         return self.minimumSizeHint()
 
 
-class HelpIconLabel(QLabel):
+class HelpIconLabel(QWidget):
     clicked = Signal()
 
     def __init__(self, parent=None):
@@ -441,6 +577,9 @@ class HelpIconLabel(QLabel):
         self.setCursor(Qt.CursorShape.WhatsThisCursor)
         self.setToolTip("了解匹配模式")
         self._hovered = False
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAutoFillBackground(False)
+        self.setStyleSheet("background: transparent; border: none;")
 
     def enterEvent(self, event):
         self._hovered = True
@@ -455,6 +594,7 @@ class HelpIconLabel(QLabel):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.eraseRect(self.rect())
         bg_color = QColor(COLORS.BRAND_LIGHT_BG) if self._hovered else QColor(COLORS.BG_TERTIARY)
         painter.setBrush(bg_color)
         painter.setPen(Qt.PenStyle.NoPen)
@@ -483,7 +623,7 @@ class MatchModeHelpDialog(ModernDialogBase):
         def build_content(content_widget):
             layout = QVBoxLayout(content_widget)
             layout.setSpacing(12)
-            layout.setContentsMargins(24, 4, 24, 24)
+            layout.setContentsMargins(DIALOG.PADDING, 4, DIALOG.PADDING, DIALOG.PADDING)
 
             modes = [
                 ("模糊匹配", "输入关键词，在文件名中任意位置匹配。例如输入\"read\"可匹配\"README.md\"、\"spreadsheet.xlsx\"。"),
@@ -572,7 +712,8 @@ class SearchBar(QWidget):
 
         search_layout.addLayout(input_row)
         search_area.setLayout(search_layout)
-        search_area.setStyleSheet(f"QWidget {{ background-color: {COLORS.BG_PRIMARY}; }}")
+        search_area.setObjectName("searchArea")
+        search_area.setStyleSheet(f"QWidget#searchArea {{ background-color: {COLORS.BG_PRIMARY}; }}")
 
         self._settings_area = SettingsArea()
 
@@ -602,37 +743,31 @@ class SearchBar(QWidget):
 
         self._settings_area.add_to_line1(self.case_sensitive_checkbox)
 
-        self.match_mode_label = QLabel("匹配模式:")
-        self.match_mode_label.setStyleSheet(f"font-size: {settings_font_size}; color: {COLORS.TEXT_SECONDARY}; border: none; background: transparent; text-decoration: none;")
-        self._settings_area.add_to_line1(self.match_mode_label)
-
-        self._match_mode_combo = QComboBox()
-        for mode in self.MATCH_MODES:
-            self._match_mode_combo.addItem(self.MATCH_MODE_LABELS[mode], mode)
-        self._match_mode_combo.setCurrentIndex(0)
-        self._match_mode_combo.setFixedHeight(28)
-        self._match_mode_combo.setStyleSheet(combo_box_style())
-        self._match_mode_combo.currentIndexChanged.connect(self._on_match_mode_changed)
-        self._settings_area.add_to_line1(self._match_mode_combo)
+        self._match_mode_slider = MatchModeSlider()
+        self._match_mode_slider.mode_changed.connect(self._on_match_mode_changed)
+        self._settings_area.add_to_line1(self._match_mode_slider)
 
         self.help_icon = HelpIconLabel()
         self.help_icon.clicked.connect(self._show_match_mode_help)
         self._settings_area.add_to_line1(self.help_icon)
 
+        self._settings_area.setObjectName("settingsCard")
         self._settings_area.setStyleSheet(f"""
-            QWidget {{
-                background-color: {COLORS.BG_SECONDARY};
-                border-bottom: 1px solid {COLORS.BORDER_DEFAULT};
+            QFrame#settingsCard {{
+                background-color: {COLORS.BG_PRIMARY};
+                border: 1px solid {COLORS.BORDER_DEFAULT};
+                border-radius: {RADIUS.LARGE}px;
+                padding: 6px 10px;
             }}
         """)
 
         main_layout.addWidget(search_area)
+        main_layout.addWidget(self._settings_area)
 
         self.setLayout(main_layout)
         self.setStyleSheet(f"""
-            QWidget {{
+            SearchBar {{
                 background-color: {COLORS.BG_PRIMARY};
-                border-bottom: 1px solid {COLORS.BORDER_DEFAULT};
             }}
         """)
 
@@ -640,23 +775,19 @@ class SearchBar(QWidget):
         self._search_mode = mode
         if mode == 'name':
             self.search_input.setPlaceholderText("输入文件名关键词搜索...")
-            self.match_mode_label.setVisible(True)
-            self._match_mode_combo.setVisible(True)
+            self._match_mode_slider.setVisible(True)
             self.help_icon.setVisible(True)
         else:
             self.search_input.setPlaceholderText("输入文件内容关键词搜索...")
-            self.match_mode_label.setVisible(False)
-            self._match_mode_combo.setVisible(False)
+            self._match_mode_slider.setVisible(False)
             self.help_icon.setVisible(False)
 
     def _set_match_mode(self, mode: str):
         self._name_match_mode = mode
-        idx = self.MATCH_MODES.index(mode) if mode in self.MATCH_MODES else 0
-        self._match_mode_combo.setCurrentIndex(idx)
+        self._match_mode_slider.set_mode(mode)
 
-    def _on_match_mode_changed(self, index: int):
-        if 0 <= index < len(self.MATCH_MODES):
-            self._name_match_mode = self.MATCH_MODES[index]
+    def _on_match_mode_changed(self, mode: str):
+        self._name_match_mode = mode
 
     def _show_match_mode_help(self):
         dialog = MatchModeHelpDialog(self)

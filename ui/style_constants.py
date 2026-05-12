@@ -232,7 +232,7 @@ class ButtonTokens:
     # 左右内边距（主要按钮，略宽以视觉平衡）
     PADDING_H_WIDE: str = "28px"
     # 圆角半径
-    BORDER_RADIUS: int = 8
+    BORDER_RADIUS: int = 10
     # 描边宽度
     BORDER_WIDTH: str = "1px"
     # 描边样式
@@ -300,7 +300,7 @@ TRANSITION = TransitionTokens()
 @dataclass(frozen=True)
 class DialogTokens:
     # 弹窗外框圆角半径
-    BORDER_RADIUS: int = 8
+    BORDER_RADIUS: int = 10
     # 弹窗外框描边宽度
     BORDER_WIDTH: str = "1px"
     # 弹窗外框描边颜色（极浅灰，营造柔和边界感）
@@ -324,7 +324,7 @@ class DialogTokens:
     # 弹窗最小宽度
     MIN_WIDTH: int = 420
     # 弹窗外层阴影边距（半透明背景的 margin）
-    OUTER_MARGIN: int = 12
+    OUTER_MARGIN: int = 24
     # 内容区域元素之间的间距
     CONTENT_SPACING: int = 16
     # 按钮之间的间距
