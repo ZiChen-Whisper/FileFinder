@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from PySide6.QtCore import QObject, Signal
 from typing import List, Optional
 from models import FileItem, SearchQuery, SearchResult, ContentMatch
-from utils.path_helper import get_file_info, is_excluded_directory, is_binary_file
+from utils.path_helper import get_file_info, is_excluded_directory
 from .file_parser import ParserRegistry
 
 logger = logging.getLogger(__name__)
@@ -39,15 +39,29 @@ class ContentSearcher(QObject):
         """
         files = []
         exclude_dirs = query.exclude_dirs
+        # 使用解析器注册表获取可解析的扩展名集合，避免对每个文件做 I/O
+        searchable_exts = set()
+        for parser in self._parser_registry._parsers:
+            if hasattr(parser, '_text_exts'):
+                searchable_exts = parser._text_exts
+                break
         
         try:
             for root, dirs, filenames in os.walk(directory):
+                if self._canceled:
+                    break
+                
                 dirs[:] = [d for d in dirs if not is_excluded_directory(d, exclude_dirs)]
                 
                 for filename in filenames:
-                    file_path = os.path.join(root, filename)
-                    if is_binary_file(file_path):
+                    if self._canceled:
+                        break
+                    
+                    ext = os.path.splitext(filename)[1].lower()
+                    if searchable_exts and ext not in searchable_exts:
                         continue
+                    
+                    file_path = os.path.join(root, filename)
                     files.append(file_path)
                     
                     if len(files) >= query.max_results:
@@ -131,39 +145,58 @@ class ContentSearcher(QObject):
                 results.append(result)
         return results
 
-    def search(self, query: SearchQuery):
+    def search(self, query: SearchQuery) -> List[SearchResult]:
         """
         执行内容搜索（P0阶段仅支持关键词搜索，正则表达式为P1功能）。
         
         Args:
             query: 搜索查询条件
+        
+        Returns:
+            搜索结果列表
         """
         self._canceled = False
         
         all_files = []
         for directory in query.include_dirs:
+            if self._canceled:
+                break
             all_files.extend(self._collect_files(directory, query))
         
         total_files = len(all_files)
         processed = 0
+        all_results: List[SearchResult] = []
         
         with ThreadPoolExecutor(max_workers=4) as executor:
             futures = []
             for i in range(0, len(all_files), 100):
+                if self._canceled:
+                    break
                 batch = all_files[i:i+100]
                 future = executor.submit(self._search_batch, batch, query)
                 futures.append(future)
             
-            for future in as_completed(futures):
-                if self._canceled:
-                    executor.shutdown(wait=False)
-                    break
-                
-                results = future.result()
-                for result in results:
-                    self.result_found.emit(result)
-                
-                processed += 100
-                self.progress_updated.emit(min(processed, total_files), total_files)
+            try:
+                for future in as_completed(futures, timeout=120):
+                    if self._canceled:
+                        executor.shutdown(wait=False, cancel_futures=True)
+                        break
+                    
+                    try:
+                        results = future.result(timeout=30)
+                    except Exception as e:
+                        logger.warning(f"搜索批次异常: {type(e).__name__}")
+                        continue
+                    
+                    for result in results:
+                        self.result_found.emit(result)
+                    all_results.extend(results)
+                    
+                    processed += 100
+                    self.progress_updated.emit(min(processed, total_files), total_files)
+            except TimeoutError:
+                logger.warning("内容搜索超时，返回已获取的结果")
+                executor.shutdown(wait=False, cancel_futures=True)
         
         self.search_completed.emit(total_files)
+        return all_results

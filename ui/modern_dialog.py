@@ -146,6 +146,13 @@ class ModernDialogBase(QDialog):
         cur_geo = self.geometry()
         shrink = 12
         target_geo = cur_geo.adjusted(shrink, shrink, -shrink, -shrink)
+        # 确保缩小后的几何不小于最小尺寸，避免 QWindowsWindow::setGeometry 警告
+        min_w = max(self.minimumWidth(), self.minimumSizeHint().width())
+        min_h = max(self.minimumHeight() if self.minimumHeight() > 0 else 0, self.minimumSizeHint().height())
+        if target_geo.width() < min_w:
+            target_geo.setWidth(min_w)
+        if min_h > 0 and target_geo.height() < min_h:
+            target_geo.setHeight(min_h)
         geo_anim.setDuration(180)
         geo_anim.setStartValue(cur_geo)
         geo_anim.setEndValue(target_geo)
@@ -165,6 +172,13 @@ class ModernDialogBase(QDialog):
         final_geo = self.geometry()
         shrink = 12
         start_geo = final_geo.adjusted(shrink, shrink, -shrink, -shrink)
+        # 确保起始几何不小于最小尺寸，避免 QWindowsWindow::setGeometry 警告
+        min_w = max(self.minimumWidth(), self.minimumSizeHint().width())
+        min_h = max(self.minimumHeight() if self.minimumHeight() > 0 else 0, self.minimumSizeHint().height())
+        if start_geo.width() < min_w:
+            start_geo.setWidth(min_w)
+        if min_h > 0 and start_geo.height() < min_h:
+            start_geo.setHeight(min_h)
         self.setGeometry(start_geo)
 
         self._open_anim_group = QParallelAnimationGroup(self)

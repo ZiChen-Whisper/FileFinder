@@ -344,37 +344,43 @@ DIALOG = DialogTokens()
 # ============================================================================
 
 FILE_ICON_MAP = {
-    # --- 代码文件 → code.svg ---
-    '.py': 'doctype/code.svg', '.js': 'doctype/code.svg', '.ts': 'doctype/code.svg',
-    '.java': 'doctype/code.svg', '.c': 'doctype/code.svg', '.cpp': 'doctype/code.svg',
-    '.h': 'doctype/code.svg', '.go': 'doctype/code.svg', '.rs': 'doctype/code.svg',
-    '.rb': 'doctype/code.svg', '.php': 'doctype/code.svg', '.html': 'doctype/code.svg',
-    '.css': 'doctype/code.svg', '.sql': 'doctype/code.svg', '.sh': 'doctype/code.svg',
-    '.bat': 'doctype/code.svg', '.ps1': 'doctype/code.svg',
-    # --- 文本文件 → TXT.svg ---
-    '.txt': 'doctype/TXT.svg', '.md': 'doctype/TXT.svg', '.log': 'doctype/TXT.svg',
-    '.json': 'doctype/TXT.svg', '.xml': 'doctype/TXT.svg', '.csv': 'doctype/TXT.svg',
-    '.yaml': 'doctype/TXT.svg', '.yml': 'doctype/TXT.svg', '.ini': 'doctype/TXT.svg',
-    '.cfg': 'doctype/TXT.svg', '.conf': 'doctype/TXT.svg', '.toml': 'doctype/TXT.svg',
+    # --- 代码文件 → 各语言专属图标 ---
+    '.py': 'doctype/Python.svg', '.js': 'doctype/JS.svg', '.ts': 'doctype/TS.svg',
+    '.java': 'doctype/Java.svg', '.c': 'doctype/Cpp.svg', '.cpp': 'doctype/Cpp.svg',
+    '.h': 'doctype/Cpp.svg', '.go': 'doctype/Go.svg', '.rs': 'doctype/Rust.svg',
+    '.rb': 'doctype/Ruby.svg', '.php': 'doctype/PHP.svg', '.html': 'doctype/HTML.svg',
+    '.css': 'doctype/CSS.svg', '.sql': 'doctype/SQL.svg', '.sh': 'doctype/Shell.svg',
+    '.bat': 'doctype/Shell.svg', '.ps1': 'doctype/Shell.svg', '.json': 'doctype/JSON.svg',
+    # --- 文本文件 → 各类型专属图标 ---
+    '.txt': 'doctype/TXT.svg', '.md': 'doctype/Markdown.svg', '.log': 'doctype/Log.svg',
+    '.xml': 'doctype/XML.svg', '.csv': 'doctype/CSV.svg',
+    '.yaml': 'doctype/YAML.svg', '.yml': 'doctype/YAML.svg', '.ini': 'doctype/INI.svg',
+    '.cfg': 'doctype/INI.svg', '.conf': 'doctype/INI.svg', '.toml': 'doctype/INI.svg',
+    '.env': 'doctype/Env.svg', '.gitignore': 'doctype/INI.svg',
     # --- 文档文件 ---
     '.pdf': 'doctype/PDF.svg', '.doc': 'doctype/Doc.svg', '.docx': 'doctype/Doc.svg',
     '.xls': 'doctype/Excel.svg', '.xlsx': 'doctype/Excel.svg',
     '.ppt': 'doctype/PPT.svg', '.pptx': 'doctype/PPT.svg',
-    # --- 媒体文件 ---
-    '.gif': 'doctype/Gif.svg', '.mp3': 'doctype/Mp3.svg', '.wav': 'doctype/Wav.svg',
-    '.flac': 'doctype/Wav.svg', '.aac': 'doctype/Wav.svg',
-    '.mov': 'doctype/Mov.svg', '.mp4': 'doctype/Mov.svg', '.avi': 'doctype/Mov.svg',
-    '.mkv': 'doctype/Mov.svg',
+    # --- 音频文件 → 各格式专属图标 ---
+    '.mp3': 'doctype/Mp3.svg', '.wav': 'doctype/Wav.svg',
+    '.flac': 'doctype/FLAC.svg', '.aac': 'doctype/AAC.svg',
+    '.ogg': 'doctype/OGG.svg', '.wma': 'doctype/WMA.svg',
+    # --- 视频文件 → 各格式专属图标 ---
+    '.mp4': 'doctype/MP4.svg', '.mkv': 'doctype/MKV.svg',
+    '.avi': 'doctype/AVI.svg', '.mov': 'doctype/MOV.svg',
+    '.wmv': 'doctype/WMV.svg', '.flv': 'doctype/FLV.svg',
+    # --- 图片文件 → 各格式专属图标 ---
+    '.jpg': 'doctype/JPG.svg', '.jpeg': 'doctype/JPG.svg', '.png': 'doctype/PNG.svg',
+    '.bmp': 'doctype/BMP.svg', '.tiff': 'doctype/BMP.svg', '.ico': 'doctype/ICO.svg',
+    '.gif': 'doctype/Gif.svg', '.svg': 'doctype/Svg.svg',
     # --- 压缩文件 → Zip.svg ---
     '.zip': 'doctype/Zip.svg', '.rar': 'doctype/Zip.svg', '.7z': 'doctype/Zip.svg',
-    '.tar': 'doctype/Zip.svg', '.gz': 'doctype/Zip.svg',
+    '.tar': 'doctype/Zip.svg', '.gz': 'doctype/Zip.svg', '.bz2': 'doctype/Zip.svg',
+    '.xz': 'doctype/Zip.svg', '.tgz': 'doctype/Zip.svg', '.tbz2': 'doctype/Zip.svg',
     # --- 设计文件 ---
-    '.svg': 'doctype/Svg.svg', '.ai': 'doctype/Ai.svg', '.psd': 'doctype/Ps.svg',
+    '.ai': 'doctype/Ai.svg', '.psd': 'doctype/Ps.svg',
     '.ae': 'doctype/Ae.svg', '.prproj': 'doctype/Pr.svg', '.xd': 'doctype/Xd.svg',
     '.rp': 'doctype/Rp.svg', '.swf': 'doctype/Swf.svg',
-    # --- 图片文件 → 图片.svg ---
-    '.jpg': 'doctype/图片.svg', '.jpeg': 'doctype/图片.svg', '.png': 'doctype/图片.svg',
-    '.bmp': 'doctype/图片.svg', '.tiff': 'doctype/图片.svg', '.ico': 'doctype/图片.svg',
     # --- 其他 ---
     '.epub': 'doctype/图书.svg', '.xmind': 'doctype/思维导图.svg',
 }

@@ -700,7 +700,7 @@ class ScanProgressDialog(QWidget):
         self._scan_log = QTextEdit()
         self._scan_log.setReadOnly(True)
         self._scan_log.setStyleSheet(scan_log_style())
-        self._scan_log.setMaximumHeight(200)
+        self._scan_log.setMinimumHeight(120)
 
         self._cancel_btn = QPushButton("取消扫描")
         self._cancel_btn.setFixedSize(140, 40)
@@ -734,7 +734,7 @@ class ScanProgressDialog(QWidget):
 
             if current_dir != self._last_logged_dir:
                 self._last_logged_dir = current_dir
-                self._scan_log.append(current_dir)
+                self._scan_log.append(f"{current_dir}  ({count:,} 个文件)")
                 sb = self._scan_log.verticalScrollBar()
                 sb.setValue(sb.maximum())
 
@@ -1714,6 +1714,8 @@ class SearchScopePanel(QWidget):
         self._rebuild_dir_buttons()
         self._update_scope_detail()
         self._update_scope_info()
+        self._update_status_dot()
+        self._update_scan_btn_state()
         self.scope_changed.emit(list(self._selected_dirs))
 
     def _update_status_dot(self):
@@ -1760,6 +1762,7 @@ class SearchScopePanel(QWidget):
             removed = old_dirs - new_set
 
             self._scanned_dirs = new_dirs
+            self._search_dirs = list(new_dirs)
             if self._scope_mode == 'all':
                 self._selected_dirs = set(new_dirs)
             self._update_scope_info()
@@ -2444,6 +2447,7 @@ class MainWindow(QMainWindow):
         self._fs_refresh_timer.timeout.connect(self._on_fs_refresh_timeout)
         self._pending_fs_changes = set()
         self._is_first_launch = is_first_launch()
+        self._has_searched = False
         self._fs_paths_ready.connect(self._apply_fs_watcher_paths)
         self._init_ui()
         self._connect_signals()
@@ -2687,8 +2691,7 @@ class MainWindow(QMainWindow):
 
         if self._search_worker and self._search_worker.isRunning():
             self._search_worker.cancel()
-            self._search_worker.terminate()
-            self._search_worker.wait()
+            self._search_worker.results_ready.disconnect(self._on_search_finished)
 
         reset_all_settings()
 
@@ -2697,6 +2700,7 @@ class MainWindow(QMainWindow):
         self._exclude_known_types = False
         self._selected_dirs = set()
         self._is_first_launch = True
+        self._has_searched = False
 
         self.result_list.clear_results()
         self.preview_panel.clear_preview()
@@ -2747,6 +2751,7 @@ class MainWindow(QMainWindow):
         self.filter_bar.sort_changed.connect(self._on_sort_changed)
         self.filter_bar.sort_order_changed.connect(self._on_sort_order_changed)
         self._search_scope_panel.scan_requested.connect(self._on_scan_requested)
+        QApplication.instance().installEventFilter(self)
 
     def _check_index_on_startup(self):
         if self._is_first_launch:
@@ -2779,7 +2784,14 @@ class MainWindow(QMainWindow):
         if scanned:
             self._search_scope_panel.set_scanned_dirs(scanned)
         self._search_scope_panel.update_scope_info(self._search_scope_panel.get_indexed_count())
-        if not self._all_results and self._search_scope_panel.get_indexed_count() > 0:
+        # 显示空闲引导页面（不自动加载所有文件）
+        if not hasattr(self, '_has_searched'):
+            self._has_searched = False
+        if not self._has_searched:
+            self.result_list.clear_results()
+            self.result_list.show_idle_state()
+            self.preview_panel.set_result(None)
+        elif not self._all_results and self._search_scope_panel.get_indexed_count() > 0:
             self._load_all_files()
 
     def _switch_to_scan_progress(self):
@@ -2815,16 +2827,21 @@ class MainWindow(QMainWindow):
         save_config(config)
 
         self._search_scope_panel.set_search_dirs(get_default_search_dirs())
+        self._search_scope_panel._scanned_dirs = list(current_dirs)
+        self._search_scope_panel._search_dirs = list(current_dirs)
 
         self._switch_to_scan_progress()
-        self._do_scan(dirs)
+        self._do_scan(list(current_dirs))
 
     def _on_scan_requested(self):
         self._switch_to_scan_progress()
         self.status_left.setText("正在扫描...")
         self.status_right.setText("")
 
-        self._do_scan(self._search_scope_panel.get_search_dirs())
+        all_dirs = self._search_scope_panel.get_all_scanned_dirs()
+        if not all_dirs:
+            all_dirs = self._search_scope_panel.get_search_dirs()
+        self._do_scan(all_dirs)
 
     def _do_scan(self, search_dirs: list, exclude_dirs: list = None):
         if exclude_dirs is None:
@@ -2845,7 +2862,9 @@ class MainWindow(QMainWindow):
 
         self._search_scope_panel.reset_scan_state(total_files)
 
-        all_dirs = self._search_scope_panel.get_search_dirs()
+        all_dirs = self._search_scope_panel.get_all_scanned_dirs()
+        if not all_dirs:
+            all_dirs = self._search_scope_panel.get_search_dirs()
         save_scanned_dirs(all_dirs)
         self._search_scope_panel.set_scanned_dirs(all_dirs)
         self._search_scope_panel.update_scope_info(total_files)
@@ -2857,6 +2876,8 @@ class MainWindow(QMainWindow):
         config.setdefault("search", {})["default_dirs"] = list(existing_dirs)
         save_config(config)
         self._search_scope_panel.set_search_dirs(list(existing_dirs))
+        self._search_scope_panel._scanned_dirs = list(existing_dirs)
+        self._search_scope_panel._search_dirs = list(existing_dirs)
 
         self.status_left.setText(f"扫描完成 - 共 {total_files:,} 个文件，耗时 {elapsed:.1f} 秒")
         self.status_right.setText("")
@@ -2968,8 +2989,9 @@ class MainWindow(QMainWindow):
 
         if self._search_worker and self._search_worker.isRunning():
             self._search_worker.cancel()
-            self._search_worker.terminate()
-            self._search_worker.wait()
+            # 不调用 terminate() + wait()，避免阻塞主线程
+            # 断开旧 worker 的信号，使其结果不会干扰新搜索
+            self._search_worker.results_ready.disconnect(self._on_search_finished)
 
         case_sensitive = self.search_bar.is_case_sensitive()
         all_dirs = self._search_scope_panel.get_all_scanned_dirs()
@@ -3001,7 +3023,9 @@ class MainWindow(QMainWindow):
         self.status_left.setText("正在搜索...")
         self.status_right.setText("")
         self._hide_loading()
+        self._has_searched = True
         self.result_list.clear_results()
+        self.result_list.hide_idle_state()
         self.result_list.show_search_progress("正在搜索...")
 
         self._search_worker = SearchWorker(query)
@@ -3055,7 +3079,23 @@ class MainWindow(QMainWindow):
     def _on_result_selected(self, result):
         self.preview_panel.set_result(result)
 
+    def eventFilter(self, obj, event):
+        from PySide6.QtCore import QEvent
+        if event.type() == QEvent.Type.KeyPress and event.key() == Qt.Key.Key_Space:
+            focus_widget = QApplication.focusWidget()
+            if focus_widget and self.result_list.isAncestorOf(focus_widget):
+                self.preview_panel.activate_preview()
+                return True
+        return super().eventFilter(obj, event)
+
     def _update_status_info(self, result):
+        if result is None:
+            for w in [self.status_separator1, self.status_size,
+                      self.status_separator2, self.status_date,
+                      self.status_separator3, self.status_path]:
+                w.setVisible(False)
+            return
+
         file_item = result.file_item
 
         self.status_size.setText(f"大小：{file_item.size_display}")
@@ -3258,8 +3298,7 @@ class MainWindow(QMainWindow):
 
         if self._search_worker and self._search_worker.isRunning():
             self._search_worker.cancel()
-            self._search_worker.terminate()
-            self._search_worker.wait(1000)
+            self._search_worker.wait(2000)
 
         from database.db_manager import DatabaseManager
         DatabaseManager().close()

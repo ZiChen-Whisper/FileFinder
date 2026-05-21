@@ -28,11 +28,8 @@ class SearchEngine:
             name_results = search_by_name(query)
 
         if query.has_content_query:
-            content_results = []
-            self._content_searcher.result_found.connect(
-                lambda r: content_results.append(r) if not self._canceled else None
-            )
-            self._content_searcher.search(query)
+            # 直接获取返回值，避免信号跨线程导致结果丢失
+            content_results = self._content_searcher.search(query)
 
             if query.has_name_query:
                 name_paths = {item.path for _, item in name_results}

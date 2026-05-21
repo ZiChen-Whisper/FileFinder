@@ -304,10 +304,10 @@ class DatabaseManager:
             )
             deleted += cursor.rowcount
             conn.commit()
+            self._search_cache.invalidate()
             return deleted
         finally:
             conn.close()
-        self._search_cache.invalidate()
 
     def get_paths_by_parent(self, parent_dir: str) -> list:
         """

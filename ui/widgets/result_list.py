@@ -1,7 +1,8 @@
 import os
 from PySide6.QtWidgets import (QListWidget, QListWidgetItem, QWidget, QVBoxLayout,
                              QLabel, QHBoxLayout, QFrame, QMenu, QApplication,
-                             QAbstractItemView, QProgressBar, QStackedWidget, QSizePolicy)
+                             QAbstractItemView, QProgressBar, QStackedWidget, QSizePolicy,
+                             QPushButton)
 from PySide6.QtGui import QFont, QIcon, QFontMetrics, QDrag, QPixmap, QPainter, QColor, QRegion, QPainterPath, QPen
 from PySide6.QtCore import Qt, Signal, QSize, QMimeData, QUrl, QPoint, QRectF, QPropertyAnimation, QEasingCurve, QTimer
 from models import SearchResult
@@ -138,6 +139,8 @@ UNIFIED_MENU_STYLE = menu_style()
 
 
 class ResultItemWidget(QFrame):
+    _icon_cache: dict = {}
+
     def __init__(self, result: SearchResult, selected: bool = False, parent=None):
         super().__init__(parent)
         self._result = result
@@ -145,6 +148,13 @@ class ResultItemWidget(QFrame):
         self._init_ui()
         if selected:
             self._apply_selected_style()
+
+    @classmethod
+    def _get_cached_pixmap(cls, icon_name: str, size: QSize) -> QPixmap:
+        key = (icon_name, size.width(), size.height())
+        if key not in cls._icon_cache:
+            cls._icon_cache[key] = QIcon(f"icons/{icon_name}").pixmap(size)
+        return cls._icon_cache[key]
 
     def _get_icon_name(self) -> str:
         if self._result.file_item.is_directory:
@@ -175,7 +185,7 @@ class ResultItemWidget(QFrame):
 
         icon_label = QLabel()
         icon_name = self._get_icon_name()
-        icon_label.setPixmap(QIcon(f"icons/{icon_name}").pixmap(QSize(28, 28)))
+        icon_label.setPixmap(self._get_cached_pixmap(icon_name, QSize(28, 28)))
         icon_label.setFixedSize(36, 36)
         icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         icon_label.setStyleSheet("border: none; background: transparent;")
@@ -289,9 +299,13 @@ class ResultListWidget(QListWidget):
     result_selected = Signal(object)
     status_info_requested = Signal(object)
 
+    INITIAL_DISPLAY_LIMIT = 200
+    LOAD_MORE_BATCH = 100
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._results = []
+        self._all_results = []
         self._item_widgets = {}
         self._anchor_index = -1
         self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
@@ -310,11 +324,15 @@ class ResultListWidget(QListWidget):
         self._progress_label = None
         self._empty_widget = None
         self._empty_text_label = None
+        self._idle_widget = None
+        self._load_more_widget = None
         self._setup_progress_overlay()
         self._setup_empty_state()
+        self._setup_idle_state()
+        self._setup_load_more()
 
     def _setup_progress_overlay(self):
-        self._progress_overlay = QFrame(self)
+        self._progress_overlay = QFrame(self.viewport())
         self._progress_overlay.setStyleSheet(f"""
             QFrame {{
                 background-color: {COLORS.OVERLAY_LIGHT};
@@ -348,7 +366,7 @@ class ResultListWidget(QListWidget):
         self._progress_overlay.setVisible(False)
 
     def _setup_empty_state(self):
-        self._empty_widget = QFrame(self)
+        self._empty_widget = QFrame(self.viewport())
         self._empty_widget.setStyleSheet("""
             QFrame {
                 background: transparent;
@@ -360,14 +378,15 @@ class ResultListWidget(QListWidget):
         layout.setSpacing(12)
 
         empty_icon = QLabel()
-        empty_icon.setPixmap(QIcon("icons/search-alt.svg").pixmap(QSize(48, 48)))
+        empty_icon.setPixmap(QIcon("icons/search-alt.svg").pixmap(QSize(64, 64)))
         empty_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         empty_icon.setStyleSheet("background: transparent; border: none;")
 
         self._empty_text_label = QLabel("未找到匹配文件")
         self._empty_text_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._empty_text_label.setStyleSheet(f"""
-            font-size: {FONT.DISPLAY_PT}px;
+            font-size: {FONT.TITLE_PT}px;
+            font-weight: bold;
             color: {COLORS.TEXT_PLACEHOLDER};
             background: transparent;
             border: none;
@@ -376,8 +395,8 @@ class ResultListWidget(QListWidget):
         hint_label = QLabel("尝试修改搜索条件或扩大搜索范围")
         hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         hint_label.setStyleSheet(f"""
-            font-size: {BTN.FONT_SIZE};
-            color: {COLORS.BORDER_HOVER};
+            font-size: {FONT.CAPTION_PT}px;
+            color: {COLORS.TEXT_TERTIARY};
             background: transparent;
             border: none;
         """)
@@ -389,12 +408,122 @@ class ResultListWidget(QListWidget):
         layout.addStretch()
         self._empty_widget.setVisible(False)
 
+    def _setup_idle_state(self):
+        """创建空闲引导页面（未搜索时显示）"""
+        self._idle_widget = QFrame(self.viewport())
+        self._idle_widget.setStyleSheet("""
+            QFrame {
+                background: transparent;
+                border: none;
+            }
+        """)
+        layout = QVBoxLayout(self._idle_widget)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.setSpacing(12)
+
+        idle_icon = QLabel()
+        idle_icon.setPixmap(QIcon("icons/search-alt.svg").pixmap(QSize(72, 72)))
+        idle_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        idle_icon.setStyleSheet("background: transparent; border: none;")
+
+        idle_title = QLabel("开始搜索")
+        idle_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        idle_title.setStyleSheet(f"""
+            font-size: {FONT.TITLE_PT + 2}px;
+            font-weight: bold;
+            color: {COLORS.TEXT_PLACEHOLDER};
+            background: transparent;
+            border: none;
+        """)
+
+        idle_hint = QLabel("输入关键词查找文件")
+        idle_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        idle_hint.setStyleSheet(f"""
+            font-size: {FONT.CAPTION_PT}px;
+            color: {COLORS.TEXT_TERTIARY};
+            background: transparent;
+            border: none;
+        """)
+
+        layout.addStretch()
+        layout.addWidget(idle_icon, 0, Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(idle_title, 0, Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(idle_hint, 0, Qt.AlignmentFlag.AlignCenter)
+        layout.addStretch()
+        self._idle_widget.setVisible(False)
+
+    def _setup_load_more(self):
+        """创建「加载更多」按钮组件"""
+        self._load_more_widget = QFrame(self)
+        self._load_more_widget.setStyleSheet(f"""
+            QFrame {{
+                background: transparent;
+                border: none;
+            }}
+        """)
+        layout = QVBoxLayout(self._load_more_widget)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.setContentsMargins(0, 8, 0, 8)
+
+        self._load_more_btn = QPushButton("加载更多结果")
+        self._load_more_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._load_more_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS.BG_SECONDARY};
+                color: {COLORS.TEXT_SECONDARY};
+                border: 1px solid {COLORS.BORDER_DEFAULT};
+                border-radius: {RADIUS.MEDIUM}px;
+                padding: 8px 24px;
+                font-size: {BTN.SMALL_FONT_SIZE};
+            }}
+            QPushButton:hover {{
+                background-color: {COLORS.BG_TERTIARY};
+                border-color: {COLORS.BORDER_HOVER};
+            }}
+        """)
+        self._load_more_btn.clicked.connect(self._on_load_more)
+        layout.addWidget(self._load_more_btn, 0, Qt.AlignmentFlag.AlignCenter)
+        self._load_more_widget.setVisible(False)
+
+    def _position_load_more(self):
+        if not self._load_more_widget or not self._load_more_widget.isVisible():
+            return
+        y = self.viewport().height() - self._load_more_widget.height()
+        self._load_more_widget.setGeometry(0, y, self.viewport().width(), self._load_more_widget.height())
+
+    def _on_load_more(self):
+        """加载更多搜索结果"""
+        current_count = len(self._results)
+        remaining = self._all_results[current_count:]
+        if not remaining:
+            self._load_more_widget.setVisible(False)
+            return
+        batch = remaining[:self.LOAD_MORE_BATCH]
+        self.setUpdatesEnabled(False)
+        for result in batch:
+            idx = len(self._results)
+            self._results.append(result)
+            item = QListWidgetItem(self)
+            widget = ResultItemWidget(result)
+            item.setSizeHint(widget.sizeHint())
+            self.setItemWidget(item, widget)
+            self._item_widgets[idx] = widget
+        self.setUpdatesEnabled(True)
+        self.viewport().update()
+        new_count = len(self._results)
+        if new_count < len(self._all_results):
+            self._load_more_btn.setText(f"加载更多结果（还有 {len(self._all_results) - new_count} 项）")
+        else:
+            self._load_more_widget.setVisible(False)
+
     def _position_empty_widget(self):
         if not self._empty_widget:
             return
-        self._empty_widget.setGeometry(0, 0, self.width(), self.height())
+        vp = self.viewport()
+        self._empty_widget.setGeometry(0, 0, vp.width(), vp.height())
 
     def show_empty_state(self, text: str = "未找到匹配文件"):
+        self.hide_idle_state()
         if self._empty_text_label:
             self._empty_text_label.setText(text)
         if self._empty_widget:
@@ -406,12 +535,35 @@ class ResultListWidget(QListWidget):
         if self._empty_widget:
             self._empty_widget.setVisible(False)
 
+    def show_idle_state(self):
+        """显示空闲引导页面（未搜索时）"""
+        self.hide_empty_state()
+        if self._idle_widget:
+            self._idle_widget.setVisible(True)
+            self._idle_widget.raise_()
+            self._position_idle_widget()
+
+    def hide_idle_state(self):
+        """隐藏空闲引导页面"""
+        if self._idle_widget:
+            self._idle_widget.setVisible(False)
+
+    def _position_idle_widget(self):
+        if not self._idle_widget:
+            return
+        vp = self.viewport()
+        self._idle_widget.setGeometry(0, 0, vp.width(), vp.height())
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
         if self._progress_overlay and self._progress_overlay.isVisible():
             self._position_progress_overlay()
         if self._empty_widget and self._empty_widget.isVisible():
             self._position_empty_widget()
+        if self._idle_widget and self._idle_widget.isVisible():
+            self._position_idle_widget()
+        if self._load_more_widget and self._load_more_widget.isVisible():
+            self._position_load_more()
 
     def _position_progress_overlay(self):
         if not self._progress_overlay:
@@ -446,21 +598,33 @@ class ResultListWidget(QListWidget):
 
     def clear_results(self):
         self._results.clear()
+        self._all_results.clear()
         self._item_widgets.clear()
         self._anchor_index = -1
+        self._prev_selected_rows = set()
+        self._load_more_widget.setVisible(False)
         self.clear()
 
     def set_results(self, results):
-        self._pending_results = list(results)
+        self._all_results = list(results)
+        self._pending_results = self._all_results[:self.INITIAL_DISPLAY_LIMIT]
         self._pending_index = 0
         self._results.clear()
         self._item_widgets.clear()
         self._anchor_index = -1
+        self._prev_selected_rows = set()
         self.clear()
+        self._load_more_widget.setVisible(False)
         self._batch_add()
 
     def _batch_add(self):
         if not hasattr(self, '_pending_results') or self._pending_index >= len(self._pending_results):
+            # 所有批次添加完成，检查是否需要显示「加载更多」
+            if len(self._results) < len(self._all_results):
+                remaining = len(self._all_results) - len(self._results)
+                self._load_more_btn.setText(f"加载更多结果（还有 {remaining} 项）")
+                self._load_more_widget.setVisible(True)
+                self._position_load_more()
             return
 
         batch_size = 50
@@ -480,7 +644,14 @@ class ResultListWidget(QListWidget):
         self._pending_index = end
 
         if self._pending_index < len(self._pending_results):
-            QTimer.singleShot(0, self._batch_add)
+            QTimer.singleShot(10, self._batch_add)
+        else:
+            # 所有批次添加完成，检查是否需要显示「加载更多」
+            if len(self._results) < len(self._all_results):
+                remaining = len(self._all_results) - len(self._results)
+                self._load_more_btn.setText(f"加载更多结果（还有 {remaining} 项）")
+                self._load_more_widget.setVisible(True)
+                self._position_load_more()
 
     def get_selected_result(self):
         items = self.selectedItems()
@@ -500,19 +671,27 @@ class ResultListWidget(QListWidget):
 
     def _on_selection_changed(self):
         selected_rows = {self.row(item) for item in self.selectedItems()}
-        for idx, widget in self._item_widgets.items():
-            widget.set_selected(idx in selected_rows)
+        if not hasattr(self, '_prev_selected_rows'):
+            self._prev_selected_rows = set()
+
+        changed = selected_rows.symmetric_difference(self._prev_selected_rows)
+        for idx in changed:
+            if idx in self._item_widgets:
+                self._item_widgets[idx].set_selected(idx in selected_rows)
+        self._prev_selected_rows = selected_rows
 
         if selected_rows:
             last_idx = max(selected_rows)
             if 0 <= last_idx < len(self._results):
                 self.result_selected.emit(self._results[last_idx])
                 self.status_info_requested.emit(self._results[last_idx])
+        else:
+            # 选中集为空时，发射 None 通知预览面板清空
+            self.result_selected.emit(None)
+            self.status_info_requested.emit(None)
 
     def _on_item_clicked(self, item):
         index = self.row(item)
-        if index == self._anchor_index and len(self.selectedItems()) == 1:
-            self.result_activated.emit(self._results[index])
         self._anchor_index = index
 
     def _on_double_click(self, item):

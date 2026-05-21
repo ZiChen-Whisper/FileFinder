@@ -4,14 +4,14 @@ from typing import Optional
 
 FILE_TYPE_MAP = {
     '.txt': 'document', '.md': 'document', '.log': 'document', '.csv': 'document',
-    '.json': 'document', '.xml': 'document', '.yaml': 'document', '.yml': 'document',
+    '.xml': 'document', '.yaml': 'document', '.yml': 'document',
     '.ini': 'document', '.cfg': 'document', '.conf': 'document', '.toml': 'document',
     '.pdf': 'document', '.docx': 'document', '.doc': 'document',
     '.xlsx': 'document', '.xls': 'document', '.pptx': 'document', '.ppt': 'document',
     '.py': 'code', '.js': 'code', '.ts': 'code', '.html': 'code', '.css': 'code',
     '.java': 'code', '.c': 'code', '.cpp': 'code', '.h': 'code', '.go': 'code',
     '.rs': 'code', '.rb': 'code', '.php': 'code', '.sh': 'code', '.bat': 'code',
-    '.ps1': 'code', '.sql': 'code',
+    '.ps1': 'code', '.sql': 'code', '.json': 'code',
     '.jpg': 'image', '.jpeg': 'image', '.png': 'image', '.gif': 'image',
     '.bmp': 'image', '.tiff': 'image', '.svg': 'image', '.ico': 'image',
     '.mp4': 'video', '.mkv': 'video', '.avi': 'video', '.mov': 'video',

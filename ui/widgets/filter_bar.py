@@ -624,6 +624,32 @@ class _SubCategorySlider(QWidget):
             _, _, extensions = self._items[index]
             self.sub_selected.emit(self._items[index][0], extensions)
 
+    def _segment_widths(self):
+        """计算每个段落的宽度，按文本内容比例分配。"""
+        if not self._items:
+            return []
+        fm = QFontMetrics(QFont("Microsoft YaHei", FONT.MICRO_PT - 1))
+        padding = 16  # 8px padding on each side
+        raw_widths = [fm.horizontalAdvance(item[1]) + padding for item in self._items]
+        total = sum(raw_widths)
+        available = self.width() - 8  # 4px margin on each side
+        if total <= 0:
+            return [available / len(self._items)] * len(self._items)
+        return [rw / total * available for rw in raw_widths]
+
+    def _segment_at_x(self, x: int) -> int:
+        """根据 x 坐标返回对应的段落索引。"""
+        if not self._items:
+            return -1
+        widths = self._segment_widths()
+        margin = 4
+        cx = margin
+        for i, sw in enumerate(widths):
+            if x < cx + sw:
+                return i
+            cx += sw
+        return len(self._items) - 1
+
     def minimumSizeHint(self):
         fm = QFontMetrics(QFont("Microsoft YaHei", FONT.MICRO_PT - 1))
         w = 0
@@ -637,9 +663,7 @@ class _SubCategorySlider(QWidget):
     def mouseMoveEvent(self, event):
         if not self._items:
             return
-        seg_w = self.width() / len(self._items)
-        idx = int(event.position().x() / seg_w)
-        idx = max(0, min(idx, len(self._items) - 1))
+        idx = self._segment_at_x(int(event.position().x()))
         if idx != self._hovered_segment:
             self._hovered_segment = idx
             self.update()
@@ -668,9 +692,28 @@ class _SubCategorySlider(QWidget):
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawRoundedRect(QRectF(0, 0, w, h), r, r)
 
-        seg_w = w / len(self._items)
-        slider_x = self._slider_pos * seg_w + 2
-        slider_w = seg_w - 4
+        widths = self._segment_widths()
+        margin = 4
+
+        # 计算每个段的起始 x 坐标
+        seg_starts = []
+        cx = margin
+        for sw in widths:
+            seg_starts.append(cx)
+            cx += sw
+
+        # 根据 _slider_pos 计算滑块位置（支持动画插值）
+        pos = self._slider_pos
+        idx_floor = int(pos)
+        idx_ceil = min(idx_floor + 1, len(self._items) - 1)
+        frac = pos - idx_floor
+
+        x_floor = seg_starts[idx_floor]
+        x_ceil = seg_starts[idx_ceil]
+        slider_x = x_floor + (x_ceil - x_floor) * frac + 2
+        slider_w_floor = widths[idx_floor] - 4
+        slider_w_ceil = widths[idx_ceil] - 4
+        slider_w = slider_w_floor + (slider_w_ceil - slider_w_floor) * frac
         slider_h = h - 4
         slider_y = 2
         slider_r = max(r - 1, 2)
@@ -692,15 +735,13 @@ class _SubCategorySlider(QWidget):
                 painter.setPen(QColor(COLORS.TEXT_PRIMARY))
             else:
                 painter.setPen(QColor(COLORS.TEXT_TERTIARY))
-            painter.drawText(QRectF(seg_w * i, 0, seg_w, h), Qt.AlignmentFlag.AlignCenter, label)
+            painter.drawText(QRectF(seg_starts[i], 0, widths[i], h), Qt.AlignmentFlag.AlignCenter, label)
 
         painter.end()
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton and self._items:
-            seg_w = self.width() / len(self._items)
-            idx = int(event.position().x() / seg_w)
-            idx = max(0, min(idx, len(self._items) - 1))
+            idx = self._segment_at_x(int(event.position().x()))
             self._on_segment_clicked(idx)
         super().mousePressEvent(event)
 
@@ -858,9 +899,9 @@ class FilterBar(QWidget):
             btn.setChecked(key == category)
 
         if category in FILE_TYPE_SUBCATEGORIES:
-            self._build_sub_buttons(category)
-            self._selected_sub_extensions = set()
-            self.filter_changed.emit(category, set())
+            self._sub_filter_widget.setVisible(True)
+            self._sub_slider.set_items(FILE_TYPE_SUBCATEGORIES[category])
+            # set_items 会触发 sub_selected 信号，进而触发 filter_changed，无需重复 emit
         else:
             self._sub_filter_widget.setVisible(False)
             self._selected_sub_extensions = set()

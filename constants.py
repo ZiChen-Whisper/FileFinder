@@ -9,14 +9,14 @@ MAX_WORKERS = 4
 BATCH_SIZE = 500
 
 TEXT_EXTENSIONS = {
-    '.txt', '.md', '.log', '.csv', '.json', '.xml',
+    '.txt', '.md', '.log', '.csv', '.xml',
     '.yaml', '.yml', '.ini', '.cfg', '.conf', '.toml', '.env', '.gitignore'
 }
 
 CODE_EXTENSIONS = {
     '.py', '.js', '.ts', '.html', '.css', '.java',
     '.c', '.cpp', '.h', '.go', '.rs', '.rb', '.php',
-    '.sh', '.bat', '.ps1', '.sql'
+    '.sh', '.bat', '.ps1', '.sql', '.json'
 }
 
 DOCUMENT_EXTENSIONS = {
@@ -36,7 +36,7 @@ AUDIO_EXTENSIONS = {
 }
 
 ARCHIVE_EXTENSIONS = {
-    '.zip', '.rar', '.7z', '.tar', '.gz', '.bz2'
+    '.zip', '.rar', '.7z', '.tar', '.gz', '.bz2', '.xz', '.tgz', '.tbz2'
 }
 
 EXCLUDED_EXTENSIONS = {
@@ -78,6 +78,7 @@ FILE_TYPE_SUBCATEGORIES = {
         ('php', 'PHP', {'.php'}),
         ('shell', 'Shell', {'.sh', '.bat', '.ps1'}),
         ('sql', 'SQL', {'.sql'}),
+        ('json', 'JSON', {'.json'}),
     ],
     'image': [
         ('all', '全部', IMAGE_EXTENSIONS),
