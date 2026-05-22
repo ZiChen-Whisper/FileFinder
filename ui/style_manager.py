@@ -19,6 +19,9 @@
 """
 
 from .style_constants import COLORS, FONT, RADIUS, SPACING, BTN, DIALOG, TRANSITION
+from pathlib import Path
+import tempfile
+import shutil
 
 
 # ============================================================================
@@ -930,18 +933,42 @@ def scope_info_scroll_style() -> str:
     """ + scrollbar_style()
 
 
-def tree_widget_style(checkmark_path: str, partial_path: str,
-                      branch_closed_path: str, branch_open_path: str) -> str:
+_temp_icons_dir = None
+
+
+def _ensure_temp_icons(icons_dir: Path) -> Path:
+    """将 SVG 图标复制到临时目录（ASCII 路径），解决 QSS url() 不支持中文路径的问题。
+
+    临时目录仅创建一次，后续调用直接复用。
+    """
+    global _temp_icons_dir
+    if _temp_icons_dir is not None and _temp_icons_dir.exists():
+        return _temp_icons_dir
+
+    _temp_icons_dir = Path(tempfile.mkdtemp(prefix='ff_icons_'))
+    for svg_name in ['checkmark.svg', 'partial-check.svg',
+                     'branch-closed.svg', 'branch-open.svg']:
+        src = icons_dir / svg_name
+        if src.exists():
+            shutil.copy2(str(src), str(_temp_icons_dir / svg_name))
+    return _temp_icons_dir
+
+
+def tree_widget_style() -> str:
     """
     树形控件样式（QTreeWidget）。
-    参数：
-      checkmark_path: 勾选图标 SVG 的绝对路径
-      partial_path: 半选图标 SVG 的绝对路径
-      branch_closed_path: 折叠分支图标 SVG 的绝对路径
-      branch_open_path: 展开分支图标 SVG 的绝对路径
+    自动将 SVG 图标复制到临时目录（ASCII 路径），
+    避免 QSS url() 无法解析中文路径的问题。
     特点：浅灰背景、品牌色选中态、自定义复选框指示器、自带滚动条。
-    应用于：_ScopeSelectionDialog 中的目录树。
+    应用于：ScopeSelectionDialog 中的目录树。
     """
+    icons_dir = Path(__file__).resolve().parent.parent / 'icons'
+    safe_dir = _ensure_temp_icons(icons_dir)
+    checkmark_path = str(safe_dir / 'checkmark.svg').replace('\\', '/')
+    partial_path = str(safe_dir / 'partial-check.svg').replace('\\', '/')
+    branch_closed_path = str(safe_dir / 'branch-closed.svg').replace('\\', '/')
+    branch_open_path = str(safe_dir / 'branch-open.svg').replace('\\', '/')
+
     return f"""
     QTreeWidget {{
         border: {BTN.BORDER_WIDTH} {BTN.BORDER_STYLE} {COLORS.BORDER_DEFAULT};

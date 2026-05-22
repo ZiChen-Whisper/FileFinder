@@ -1,9 +1,39 @@
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QFrame, QWidget, QHBoxLayout,
                              QLabel, QPushButton, QSizePolicy, QGraphicsDropShadowEffect)
-from PySide6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QRectF, QParallelAnimationGroup, Property, QSize
-from PySide6.QtGui import QFont, QColor, QPainter, QPen, QPixmap
+from PySide6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QRectF, QParallelAnimationGroup, Property, QSize, QPointF
+from PySide6.QtGui import QFont, QColor, QPainter, QPen, QPixmap, QPolygonF
 from .style_constants import COLORS, FONT, RADIUS, DIALOG
-from .style_manager import dialog_frame_style, dialog_title_style
+from .style_manager import dialog_frame_style, dialog_title_style, button_primary, button_secondary, dialog_body_style
+
+
+class _CloseButton(QPushButton):
+    """使用 QPainter 绘制 X 关闭图标的按钮，支持 hover 变色"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._hovered = False
+
+    def enterEvent(self, event):
+        self._hovered = True
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self._hovered = False
+        self.update()
+        super().leaveEvent(event)
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        color = QColor(COLORS.TEXT_PRIMARY) if self._hovered else QColor(COLORS.TEXT_TERTIARY)
+        pen = QPen(color, 1.5)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(pen)
+        painter.drawLine(9, 9, 19, 19)
+        painter.drawLine(19, 9, 9, 19)
+        painter.end()
 
 
 class _DialogShadowFrame(QFrame):
@@ -99,7 +129,7 @@ class ModernDialogBase(QDialog):
         title_label.setStyleSheet(dialog_title_style())
         title_bar_layout.addWidget(title_label, 1)
 
-        close_btn = QPushButton("✕")
+        close_btn = _CloseButton()
         close_btn.setFixedSize(28, 28)
         close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         close_btn.setStyleSheet(f"""
@@ -107,12 +137,9 @@ class ModernDialogBase(QDialog):
                 border: none;
                 border-radius: {RADIUS.MEDIUM}px;
                 background: transparent;
-                color: {COLORS.TEXT_TERTIARY};
-                font-size: 14px;
             }}
             QPushButton:hover {{
                 background-color: {COLORS.BG_HOVER};
-                color: {COLORS.TEXT_PRIMARY};
             }}
             QPushButton:pressed {{
                 background-color: {COLORS.BG_TERTIARY};
@@ -142,22 +169,22 @@ class ModernDialogBase(QDialog):
         opacity_anim.setEasingCurve(QEasingCurve.Type.InCubic)
         self._close_anim_group.addAnimation(opacity_anim)
 
-        geo_anim = QPropertyAnimation(self, b"geometry")
-        cur_geo = self.geometry()
-        shrink = 12
-        target_geo = cur_geo.adjusted(shrink, shrink, -shrink, -shrink)
-        # 确保缩小后的几何不小于最小尺寸，避免 QWindowsWindow::setGeometry 警告
-        min_w = max(self.minimumWidth(), self.minimumSizeHint().width())
-        min_h = max(self.minimumHeight() if self.minimumHeight() > 0 else 0, self.minimumSizeHint().height())
-        if target_geo.width() < min_w:
-            target_geo.setWidth(min_w)
-        if min_h > 0 and target_geo.height() < min_h:
-            target_geo.setHeight(min_h)
-        geo_anim.setDuration(180)
-        geo_anim.setStartValue(cur_geo)
-        geo_anim.setEndValue(target_geo)
-        geo_anim.setEasingCurve(QEasingCurve.Type.InCubic)
-        self._close_anim_group.addAnimation(geo_anim)
+        if self._resizable:
+            geo_anim = QPropertyAnimation(self, b"geometry")
+            cur_geo = self.geometry()
+            shrink = 12
+            target_geo = cur_geo.adjusted(shrink, shrink, -shrink, -shrink)
+            min_w = max(self.minimumWidth(), self.minimumSizeHint().width())
+            min_h = max(self.minimumHeight() if self.minimumHeight() > 0 else 0, self.minimumSizeHint().height())
+            if target_geo.width() < min_w:
+                target_geo.setWidth(min_w)
+            if min_h > 0 and target_geo.height() < min_h:
+                target_geo.setHeight(min_h)
+            geo_anim.setDuration(180)
+            geo_anim.setStartValue(cur_geo)
+            geo_anim.setEndValue(target_geo)
+            geo_anim.setEasingCurve(QEasingCurve.Type.InCubic)
+            self._close_anim_group.addAnimation(geo_anim)
 
         self._close_anim_group.finished.connect(self.reject)
         self._close_anim_group.start()
@@ -168,18 +195,9 @@ class ModernDialogBase(QDialog):
             return
 
         self.setWindowOpacity(0.0)
+        self.adjustSize()
 
         final_geo = self.geometry()
-        shrink = 12
-        start_geo = final_geo.adjusted(shrink, shrink, -shrink, -shrink)
-        # 确保起始几何不小于最小尺寸，避免 QWindowsWindow::setGeometry 警告
-        min_w = max(self.minimumWidth(), self.minimumSizeHint().width())
-        min_h = max(self.minimumHeight() if self.minimumHeight() > 0 else 0, self.minimumSizeHint().height())
-        if start_geo.width() < min_w:
-            start_geo.setWidth(min_w)
-        if min_h > 0 and start_geo.height() < min_h:
-            start_geo.setHeight(min_h)
-        self.setGeometry(start_geo)
 
         self._open_anim_group = QParallelAnimationGroup(self)
 
@@ -190,12 +208,23 @@ class ModernDialogBase(QDialog):
         opacity_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
         self._open_anim_group.addAnimation(opacity_anim)
 
-        geo_anim = QPropertyAnimation(self, b"geometry")
-        geo_anim.setDuration(200)
-        geo_anim.setStartValue(start_geo)
-        geo_anim.setEndValue(final_geo)
-        geo_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-        self._open_anim_group.addAnimation(geo_anim)
+        if self._resizable:
+            shrink = 12
+            start_geo = final_geo.adjusted(shrink, shrink, -shrink, -shrink)
+            min_w = max(self.minimumWidth(), self.minimumSizeHint().width())
+            min_h = max(self.minimumHeight() if self.minimumHeight() > 0 else 0, self.minimumSizeHint().height())
+            if start_geo.width() < min_w:
+                start_geo.setWidth(min_w)
+            if min_h > 0 and start_geo.height() < min_h:
+                start_geo.setHeight(min_h)
+            self.setGeometry(start_geo)
+
+            geo_anim = QPropertyAnimation(self, b"geometry")
+            geo_anim.setDuration(200)
+            geo_anim.setStartValue(start_geo)
+            geo_anim.setEndValue(final_geo)
+            geo_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+            self._open_anim_group.addAnimation(geo_anim)
 
         self._open_anim_group.start()
 
@@ -220,3 +249,143 @@ class ModernDialogBase(QDialog):
     def mouseReleaseEvent(self, event):
         self._drag_pos = None
         super().mouseReleaseEvent(event)
+
+
+class ModernMessageBox(ModernDialogBase):
+    """现代化消息对话框，支持 info/warning/error/question 四种图标类型"""
+
+    def __init__(self, parent=None, icon_type='info', title='', text='', buttons=None):
+        super().__init__(parent, title=title, min_width=DIALOG.MIN_WIDTH, resizable=False)
+        self._result = None
+        self._buttons = buttons or {}
+        self._icon_type = icon_type
+        self._text = text
+        self._init_ui()
+
+    def _init_ui(self):
+        icon_pixmap = self._create_icon_pixmap()
+
+        def build_content(content_widget):
+            layout = QVBoxLayout(content_widget)
+            layout.setSpacing(DIALOG.CONTENT_SPACING)
+            layout.setContentsMargins(DIALOG.PADDING, 4, DIALOG.PADDING, DIALOG.PADDING)
+
+            text_label = QLabel(self._text)
+            text_label.setStyleSheet(dialog_body_style())
+            text_label.setWordWrap(True)
+
+            layout.addWidget(text_label)
+
+            btn_row = QHBoxLayout()
+            btn_row.addStretch()
+
+            for key, (label, style_type) in self._buttons.items():
+                btn = QPushButton(label)
+                btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                if style_type == 'primary':
+                    btn.setStyleSheet(button_primary("padding: 8px 28px; border-radius: 10px; min-width: 80px;"))
+                else:
+                    btn.setStyleSheet(button_secondary("padding: 8px 28px; border-radius: 10px; min-width: 80px;"))
+                btn.clicked.connect(lambda checked, k=key: self._on_button(k))
+                btn_row.addWidget(btn)
+                btn_row.addSpacing(DIALOG.BUTTON_SPACING)
+
+            layout.addSpacing(8)
+            layout.addLayout(btn_row)
+
+        self._create_shadow_frame(build_content, icon_pixmap=icon_pixmap)
+
+    def _create_icon_pixmap(self) -> QPixmap:
+        pixmap = QPixmap(48, 48)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        if self._icon_type == 'warning':
+            painter.setBrush(QColor(245, 158, 11))
+            painter.setPen(Qt.PenStyle.NoPen)
+            tri = QPolygonF()
+            tri.append(QPointF(24, 6))
+            tri.append(QPointF(44, 42))
+            tri.append(QPointF(4, 42))
+            painter.drawPolygon(tri)
+            painter.setPen(QPen(QColor(255, 255, 255), 3))
+            painter.drawLine(24, 18, 24, 30)
+            painter.drawPoint(24, 35)
+        elif self._icon_type == 'error':
+            painter.setBrush(QColor(239, 68, 68))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawRoundedRect(4, 4, 40, 40, 10, 10)
+            painter.setPen(QPen(QColor(255, 255, 255), 3))
+            painter.drawLine(16, 16, 32, 32)
+            painter.drawLine(32, 16, 16, 32)
+        elif self._icon_type == 'question':
+            painter.setBrush(QColor(59, 130, 246))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawRoundedRect(4, 4, 40, 40, 10, 10)
+            painter.setPen(QColor(255, 255, 255))
+            font = QFont()
+            font.setPointSize(24)
+            font.setBold(True)
+            painter.setFont(font)
+            painter.drawText(QRectF(4, 4, 40, 40), Qt.AlignmentFlag.AlignCenter, "?")
+        else:
+            painter.setBrush(QColor(16, 185, 129))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawRoundedRect(4, 4, 40, 40, 10, 10)
+            painter.setPen(QPen(QColor(255, 255, 255), 3))
+            painter.drawLine(14, 24, 21, 32)
+            painter.drawLine(21, 32, 34, 16)
+
+        painter.end()
+        return pixmap
+
+    def _on_button(self, key):
+        self._result = key
+        self.accept()
+
+    def exec(self):
+        super().exec()
+        return self._result
+
+
+def styled_msg_box(parent, icon, title, text, buttons=None):
+    """创建 ModernMessageBox 的便捷函数，将 QMessageBox 标准按钮映射为自定义按钮"""
+    from PySide6.QtWidgets import QMessageBox
+
+    if buttons is None:
+        buttons = QMessageBox.StandardButton.Ok
+
+    icon_map = {
+        QMessageBox.Icon.Information: 'info',
+        QMessageBox.Icon.Warning: 'warning',
+        QMessageBox.Icon.Critical: 'error',
+        QMessageBox.Icon.Question: 'question',
+        QMessageBox.Icon.NoIcon: 'info',
+    }
+    icon_type = icon_map.get(icon, 'info')
+
+    btn_defs = {}
+    if buttons == QMessageBox.StandardButton.Ok:
+        btn_defs['ok'] = ('确定', 'primary')
+    elif buttons == (QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No):
+        btn_defs['no'] = ('否', 'secondary')
+        btn_defs['yes'] = ('是', 'primary')
+    elif buttons == (QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No |
+                     QMessageBox.StandardButton.Cancel):
+        btn_defs['cancel'] = ('取消', 'secondary')
+        btn_defs['no'] = ('否', 'secondary')
+        btn_defs['yes'] = ('是', 'primary')
+    else:
+        btn_defs['ok'] = ('确定', 'primary')
+
+    dlg = ModernMessageBox(parent, icon_type, title, text, btn_defs)
+    result = dlg.exec()
+
+    if result == 'yes':
+        return QMessageBox.StandardButton.Yes
+    elif result == 'no':
+        return QMessageBox.StandardButton.No
+    elif result == 'cancel':
+        return QMessageBox.StandardButton.Cancel
+    return QMessageBox.StandardButton.Ok

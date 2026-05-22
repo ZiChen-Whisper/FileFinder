@@ -10,7 +10,7 @@ from constants import FILE_TYPE_CATEGORIES, FILE_TYPE_SUBCATEGORIES
 from utils.path_helper import get_all_drives, get_user_directories, normalize_path
 from database.db_manager import DatabaseManager
 from ..style_constants import COLORS, FONT, RADIUS, BTN, DIALOG, TRANSITION
-from ..modern_dialog import ModernDialogBase
+from ..modern_dialog import ModernDialogBase, ModernMessageBox, styled_msg_box
 from ..style_manager import (
     msg_box_style, button_primary, button_secondary, button_filter,
     button_scan, button_scan_green, button_small_primary, button_small_secondary,
@@ -21,231 +21,7 @@ from ..style_manager import (
 )
 
 
-class AnimatedRadioButton(QRadioButton):
-    _INDICATOR_MARGIN = 3
-
-    def __init__(self, text="", parent=None, font_pt=None):
-        super().__init__(text, parent)
-        self._check_opacity = 0.0
-        self._hovered = False
-        self._font_pt = font_pt or FONT.CAPTION_PT
-        self._anim = QPropertyAnimation(self, b"check_opacity")
-        self._anim.setDuration(150)
-        self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-        self.toggled.connect(self._on_toggled)
-
-    def _on_toggled(self, checked):
-        self._anim.stop()
-        self._anim.setStartValue(self._check_opacity)
-        self._anim.setEndValue(1.0 if checked else 0.0)
-        self._anim.start()
-
-    def get_check_opacity(self):
-        return self._check_opacity
-
-    def set_check_opacity(self, opacity):
-        self._check_opacity = opacity
-        self.update()
-
-    check_opacity = Property(float, get_check_opacity, set_check_opacity)
-
-    def enterEvent(self, event):
-        self._hovered = True
-        self.update()
-        super().enterEvent(event)
-
-    def leaveEvent(self, event):
-        self._hovered = False
-        self.update()
-        super().leaveEvent(event)
-
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        m = self._INDICATOR_MARGIN
-        indicator_size = 14
-        indicator_y = (self.height() - indicator_size) / 2
-        indicator_rect = QRectF(m, indicator_y, indicator_size, indicator_size)
-        center = indicator_rect.center()
-        outer_radius = indicator_size / 2
-
-        if self.isEnabled():
-            if self.isChecked():
-                border_color = QColor(COLORS.BRAND)
-                border_color.setAlphaF(max(0.3, self._check_opacity))
-                if self._hovered:
-                    border_color = QColor(COLORS.BRAND_HOVER)
-                    border_color.setAlphaF(max(0.5, self._check_opacity))
-                painter.setPen(QPen(border_color, 2))
-                painter.setBrush(Qt.BrushStyle.NoBrush)
-                painter.drawEllipse(center, outer_radius, outer_radius)
-
-                inner_radius = outer_radius * 0.4
-                dot_color = QColor(COLORS.BRAND_HOVER if self._hovered else COLORS.BRAND)
-                dot_color.setAlphaF(self._check_opacity)
-                painter.setPen(Qt.PenStyle.NoPen)
-                painter.setBrush(dot_color)
-                painter.drawEllipse(center, inner_radius, inner_radius)
-            else:
-                hover_border = QColor(COLORS.BRAND) if self._hovered else QColor(COLORS.BORDER_HOVER)
-                painter.setPen(QPen(hover_border, 2))
-                painter.setBrush(Qt.BrushStyle.NoBrush)
-                painter.drawEllipse(center, outer_radius, outer_radius)
-        else:
-            if self.isChecked():
-                painter.setPen(QPen(QColor(COLORS.BORDER_HOVER), 2))
-                painter.setBrush(Qt.BrushStyle.NoBrush)
-                painter.drawEllipse(center, outer_radius, outer_radius)
-
-                inner_radius = outer_radius * 0.4
-                painter.setPen(Qt.PenStyle.NoPen)
-                painter.setBrush(QColor(COLORS.BORDER_HOVER))
-                painter.drawEllipse(center, inner_radius, inner_radius)
-            else:
-                painter.setPen(QPen(QColor(COLORS.BORDER_DEFAULT), 2))
-                painter.setBrush(Qt.BrushStyle.NoBrush)
-                painter.drawEllipse(center, outer_radius, outer_radius)
-
-        text_x = m + indicator_size + 6
-        text_color = QColor(COLORS.TEXT_SECONDARY if self.isEnabled() else COLORS.TEXT_PLACEHOLDER)
-        if self._hovered and self.isEnabled():
-            text_color = QColor(COLORS.TEXT_PRIMARY)
-        painter.setPen(text_color)
-        font = QFont()
-        font.setPointSize(self._font_pt)
-        painter.setFont(font)
-        fm = QFontMetrics(font)
-        text_rect = QRectF(text_x, 0, fm.horizontalAdvance(self.text()) + 4, self.height())
-        painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, self.text())
-        painter.end()
-
-    def minimumSizeHint(self):
-        font = QFont()
-        font.setPointSize(self._font_pt)
-        fm = QFontMetrics(font)
-        text_width = fm.horizontalAdvance(self.text())
-        return QSize(self._INDICATOR_MARGIN + 14 + 6 + text_width + 4, 26)
-
-    def sizeHint(self):
-        return self.minimumSizeHint()
-
-
-class _ModernMessageBox(ModernDialogBase):
-    def __init__(self, parent=None, icon_type='info', title='', text='', buttons=None):
-        super().__init__(parent, title=title, min_width=DIALOG.MIN_WIDTH, resizable=False)
-        self._result = None
-        self._buttons = buttons or {}
-        self._icon_type = icon_type
-        self._text = text
-        self._init_ui()
-
-    def _init_ui(self):
-        icon_pixmap = self._create_icon_pixmap()
-
-        def build_content(content_widget):
-            layout = QVBoxLayout(content_widget)
-            layout.setSpacing(DIALOG.CONTENT_SPACING)
-            layout.setContentsMargins(DIALOG.PADDING, 4, DIALOG.PADDING, DIALOG.PADDING)
-            text_label = QLabel(self._text)
-            text_label.setStyleSheet(dialog_body_style())
-            text_label.setWordWrap(True)
-            layout.addWidget(text_label)
-            btn_row = QHBoxLayout()
-            btn_row.addStretch()
-            for key, (label, style_type) in self._buttons.items():
-                btn = QPushButton(label)
-                btn.setCursor(Qt.CursorShape.PointingHandCursor)
-                if style_type == 'primary':
-                    btn.setStyleSheet(button_primary("padding: 8px 28px; border-radius: 10px; min-width: 80px;"))
-                else:
-                    btn.setStyleSheet(button_secondary("padding: 8px 28px; border-radius: 10px; min-width: 80px;"))
-                btn.clicked.connect(lambda checked, k=key: self._on_button(k))
-                btn_row.addWidget(btn)
-                btn_row.addSpacing(DIALOG.BUTTON_SPACING)
-            layout.addSpacing(8)
-            layout.addLayout(btn_row)
-
-        self._create_shadow_frame(build_content, icon_pixmap=icon_pixmap)
-
-    def _create_icon_pixmap(self) -> QPixmap:
-        pixmap = QPixmap(48, 48)
-        pixmap.fill(Qt.GlobalColor.transparent)
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        if self._icon_type == 'warning':
-            painter.setBrush(QColor(245, 158, 11))
-            painter.setPen(Qt.PenStyle.NoPen)
-            tri = QPolygonF()
-            tri.append(QPointF(24, 6))
-            tri.append(QPointF(44, 42))
-            tri.append(QPointF(4, 42))
-            painter.drawPolygon(tri)
-            painter.setPen(QPen(QColor(255, 255, 255), 3))
-            painter.drawLine(24, 18, 24, 30)
-            painter.drawPoint(24, 35)
-        elif self._icon_type == 'error':
-            painter.setBrush(QColor(239, 68, 68))
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.drawRoundedRect(4, 4, 40, 40, 10, 10)
-            painter.setPen(QPen(QColor(255, 255, 255), 3))
-            painter.drawLine(16, 16, 32, 32)
-            painter.drawLine(32, 16, 16, 32)
-        elif self._icon_type == 'question':
-            painter.setBrush(QColor(59, 130, 246))
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.drawRoundedRect(4, 4, 40, 40, 10, 10)
-            painter.setPen(QColor(255, 255, 255))
-            font = QFont()
-            font.setPointSize(24)
-            font.setBold(True)
-            painter.setFont(font)
-            painter.drawText(QRectF(4, 4, 40, 40), Qt.AlignmentFlag.AlignCenter, "?")
-        else:
-            painter.setBrush(QColor(16, 185, 129))
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.drawRoundedRect(4, 4, 40, 40, 10, 10)
-            painter.setPen(QPen(QColor(255, 255, 255), 3))
-            painter.drawLine(14, 24, 21, 32)
-            painter.drawLine(21, 32, 34, 16)
-        painter.end()
-        return pixmap
-
-    def _on_button(self, key):
-        self._result = key
-        self.accept()
-
-    def exec(self):
-        super().exec()
-        return self._result
-
-
-def _styled_msg_box(parent, icon, title, text, buttons=None):
-    if buttons is None:
-        buttons = QMessageBox.StandardButton.Ok
-    icon_map = {
-        QMessageBox.Icon.Information: 'info',
-        QMessageBox.Icon.Warning: 'warning',
-        QMessageBox.Icon.Critical: 'error',
-        QMessageBox.Icon.Question: 'question',
-        QMessageBox.Icon.NoIcon: 'info',
-    }
-    icon_type = icon_map.get(icon, 'info')
-    btn_defs = {}
-    if buttons == QMessageBox.StandardButton.Ok:
-        btn_defs['ok'] = ('确定', 'primary')
-    elif buttons == (QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No):
-        btn_defs['no'] = ('否', 'secondary')
-        btn_defs['yes'] = ('是', 'primary')
-    else:
-        btn_defs['ok'] = ('确定', 'primary')
-    dlg = _ModernMessageBox(parent, icon_type, title, text, btn_defs)
-    result = dlg.exec()
-    if result == 'yes':
-        return QMessageBox.StandardButton.Yes
-    elif result == 'no':
-        return QMessageBox.StandardButton.No
-    return QMessageBox.StandardButton.Ok
+from .animated_radio_button import AnimatedRadioButton
 
 
 def _make_colored_icon(icon_path: str, color_hex: str, size: int = 16) -> QIcon:
@@ -467,7 +243,7 @@ class SearchScopeDialog(ModernDialogBase):
 
     def _on_confirm(self):
         if not self._dirs:
-            _styled_msg_box(
+            styled_msg_box(
                 self, QMessageBox.Icon.Warning,
                 "路径不能为空", "至少需要保留一个扫描路径，否则无法进行搜索。"
             )
@@ -493,12 +269,12 @@ class SearchScopeDialog(ModernDialogBase):
                 self.dir_list.addItem(path)
                 self.path_input.clear()
             else:
-                _styled_msg_box(
+                styled_msg_box(
                     self, QMessageBox.Icon.Warning,
                     "路径无效", f"目录不存在或无法访问：\n{path}"
                 ).exec()
         elif path and path in self._dirs:
-            _styled_msg_box(
+            styled_msg_box(
                 self, QMessageBox.Icon.Information,
                 "提示", "该目录已在列表中"
             ).exec()

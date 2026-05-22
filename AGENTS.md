@@ -1,7 +1,7 @@
 # FileFinder AI 开发指令
 
 > 本文档是 FileFinder 项目开发的行为准则和操作指南，供 AI 助手在开发过程中遵循。
-> 版本：v1.1 | 更新日期：2026-05-10
+> 版本：v2.0 | 更新日期：2026-05-22
 
 ---
 
@@ -15,14 +15,18 @@ FileFinder 是一款轻量级的本地文件搜索桌面工具，帮助用户通
 
 | 特性 | 说明 | 状态 |
 |------|------|------|
-| **文件名搜索** | 模糊匹配、通配符、精确匹配 + SQLite 索引 + 内存缓存 | ✅ 已实现 |
+| **文件名搜索** | 模糊/精确/通配符/正则匹配 + SQLite 索引 + 内存缓存 + 评分排序 | ✅ 已实现 |
 | **文件内容搜索** | 纯文本/代码文件搜索，多线程并发 | ✅ 已实现 |
 | **联合搜索** | 文件名 + 内容 AND 组合搜索 | ✅ 已实现 |
 | **磁盘扫描索引** | SQLite 持久化索引，一次扫描终生复用 | ✅ 已实现 |
 | **文件系统监控** | QFileSystemWatcher 自动同步索引 | ✅ 已实现 |
-| **文档格式解析** | PDF/Word/Excel 解析 | 🔄 P1 |
-| **内容预览高亮** | 搜索结果高亮显示匹配内容 | 🔄 P1 |
-| **系统托盘** | 全局快捷键唤起，后台常驻 | 🔄 P2 |
+| **内容预览 + 高亮** | 文本/代码/图片/PDF/Excel/Markdown/HTML 预览 + 搜索关键词高亮 | ✅ 已实现 |
+| **结果排序** | 按相关度/名称/修改时间/大小排序 + 升降序 | ✅ 已实现 |
+| **文档格式内容搜索** | PDF/Word/Excel 内容搜索（需在 file_parser.py 注册解析器） | ❌ 未实现 |
+| **搜索历史 UI** | DAO 层已完成，搜索栏历史下拉未集成 | ❌ 未实现 |
+| **内容正则搜索** | 文件名正则已实现，内容搜索仅支持关键词 | ❌ 未实现 |
+| **高级过滤** | 文件大小/修改日期范围筛选（SearchQuery 有字段，UI 无控件） | ❌ 未实现 |
+| **系统托盘** | 全局快捷键唤起，后台常驻 | ❌ P2 |
 
 ### 1.3 技术栈
 
@@ -31,8 +35,10 @@ FileFinder 是一款轻量级的本地文件搜索桌面工具，帮助用户通
 | GUI 框架 | **PySide6** | 桌面应用界面（注意：非 PyQt6） |
 | 编程语言 | Python 3.10+ | 后端业务逻辑 |
 | 数据库 | SQLite 3 | 本地数据存储 + 内存缓存 |
-| 文档解析 | PyMuPDF / python-docx / openpyxl | 多格式文档解析（P1） |
+| 文档预览 | PyMuPDF / openpyxl / markdown | PDF/Excel/Markdown 预览渲染 |
+| 文档解析 | python-docx / python-pptx | Word/PPT 内容提取（待集成到搜索） |
 | 编码检测 | charset-normalizer | 自动检测文件编码 |
+| 样式系统 | style_constants.py + style_manager.py | 集中化样式令牌 + QSS 生成 |
 | 打包工具 | PyInstaller | 打包为 exe |
 
 ### 1.4 相关文档
@@ -40,10 +46,10 @@ FileFinder 是一款轻量级的本地文件搜索桌面工具，帮助用户通
 | 文档 | 用途 |
 |------|------|
 | RESEARCH.md | 市场调研和技术可行性分析 |
-| PRD.md | 产品需求规格说明书 |
+| PRD.md | 产品需求规格说明书（初期版本，部分内容已过时） |
 | TECH_DESIGN.md | 技术架构和实现方案 |
-| **AGENTS.md** | **开发行为准则（本文档）** |
-| plan.md | 开发步骤和里程碑 |
+| **AGENTS.md** | **开发行为准则（本文档，以本文件为准）** |
+| PLAN.md | 开发步骤和里程碑（初期版本，部分内容已过时） |
 
 ---
 
@@ -53,48 +59,53 @@ FileFinder 是一款轻量级的本地文件搜索桌面工具，帮助用户通
 
 ```
 filefinder/
-├── main.py                    # 程序入口，只做初始化
-├── config.py                  # 配置管理，集中管理常量
-├── constants.py               # 常量定义（扩展名分类、窗口尺寸等）
+├── main.py                    # 程序入口，只做做初始化
+├── config.py                  # 配置管理（JSON 文件读写 + 扫描状态管理）
+├── constants.py               # 常量定义（扩展名分类、窗口尺寸、性能参数等）
 ├── requirements.txt           # 依赖清单
 │
 ├── models/                    # 数据模型层
-│   ├── file_item.py           # FileItem 数据类
-│   ├── search_query.py        # SearchQuery 数据类
+│   ├── file_item.py           # FileItem 数据类 + FILE_TYPE_MAP
+│   ├── search_query.py        # SearchQuery 数据类（含大小/日期过滤字段）
 │   ├── search_result.py       # SearchResult / ContentMatch 数据类
 │   └── search_history.py      # SearchHistory 数据类
 │
 ├── core/                      # 核心业务逻辑层
-│   ├── name_searcher.py       # 文件名搜索（模糊/精确/通配符 + 评分）
-│   ├── content_searcher.py    # 内容搜索（多线程 + 信号通知）
-│   ├── file_parser.py         # 文件解析（注册表模式）
-│   └── search_engine.py       # 搜索调度引擎
+│   ├── name_searcher.py       # 文件名搜索（模糊/精确/通配符/正则 + 评分 + 预过滤优化）
+│   ├── content_searcher.py    # 内容搜索（多线程 + 信号通知 + 取消支持）
+│   ├── file_parser.py         # 文件解析（注册表模式，当前仅 TextParser）
+│   └── search_engine.py       # 搜索调度引擎（联合搜索 + 排序）
 │
 ├── ui/                        # 用户界面层
-│   ├── main_window.py         # 主窗口
-│   ├── widgets/               # UI 组件
-│   │   ├── search_bar.py      # 搜索栏
-│   │   ├── result_list.py     # 结果列表
-│   │   ├── filter_bar.py      # 筛选栏
-│   │   └── preview_panel.py   # 预览面板
-│   └── dialogs/               # 对话框
+│   ├── main_window.py         # 主窗口（⚠️ 约3300行，含多个应独立的内联组件）
+│   ├── style_constants.py     # 样式令牌（颜色/字号/圆角/间距/FILE_ICON_MAP）
+│   ├── style_manager.py       # QSS 样式生成函数（30+ 个组件样式）
+│   ├── modern_dialog.py       # 现代化对话框基类（阴影/动画/拖拽）
+│   ├── widgets/
+│   │   ├── search_bar.py      # 搜索栏（防抖已集成，4种匹配模式切换）
+│   │   ├── result_list.py     # 结果列表（分批渲染 + 加载更多 + 拖拽）
+│   │   ├── filter_bar.py      # 筛选栏（9大分类 + 子分类 + 排序）
+│   │   ├── preview_panel.py   # 预览面板（⚠️ 约3300行，功能丰富）
+│   │   └── rounded_menu.py    # 圆角右键菜单
+│   └── dialogs/
 │       └── settings_dialog.py # 设置对话框
 │
 ├── utils/                     # 工具函数
-│   ├── encoding.py            # 编码检测
-│   ├── path_helper.py         # 路径工具
-│   └── thread_helper.py       # 防抖器
+│   ├── encoding.py            # 编码检测 + 文本文件读取
+│   ├── path_helper.py         # 路径工具（规范化/二进制检测/排除判断）
+│   ├── thread_helper.py       # 防抖器（Debouncer，已集成到 SearchBar）
+│   └── flow_layout.py         # 流式布局（用于筛选栏标签排列）
 │
 ├── database/                  # 数据访问层
-│   ├── db_manager.py          # 数据库管理器（单例 + 内存缓存）
-│   ├── history_dao.py         # 搜索历史 DAO
-│   └── settings_dao.py        # 设置 DAO
+│   ├── db_manager.py          # 数据库管理器（单例 + 内存缓存 SearchCache）
+│   ├── history_dao.py         # 搜索历史 DAO（已修复连接问题）
+│   └── settings_dao.py        # 设置 DAO（已修复连接问题）
 │
 ├── data/                      # 运行时数据
 │   └── filefinder.db          # SQLite 数据库
 │
 └── icons/                     # 图标资源
-    ├── doctype/               # 文件类型图标（SVG）
+    ├── doctype/               # 文件类型图标（SVG，60+ 种）
     └── *.svg                  # UI 图标
 ```
 
@@ -105,61 +116,120 @@ filefinder/
 | **models/** | 定义数据结构，不包含业务逻辑 | 不做 IO 操作 |
 | **core/** | 实现搜索算法和解析逻辑 | 不直接操作 UI |
 | **ui/** | 只做界面展示和用户交互 | 不直接读写数据库 |
+| **ui/style_constants.py** | 集中定义所有样式令牌和图标映射 | 禁止在组件中重复定义样式常量 |
+| **ui/style_manager.py** | 根据 style_constants 生成 QSS | 不硬编码颜色/字号 |
 | **utils/** | 纯函数，无状态 | 不依赖业务逻辑 |
 | **database/** | 数据读写，SQL 操作 | 不处理业务规则 |
 
-### 2.3 开发优先级规范
+### 2.3 功能实现状态
 
-**当前进度：P0 MVP 已完成，P1 开发中**
+#### ✅ 已完成功能
 
-```
-P0 MVP（核心功能）✅ 已完成 → P1 增强功能 🔄 开发中 → P2 完善功能
-```
+**文件名搜索（core/name_searcher.py）：**
+- [x] 模糊匹配（子串包含）
+- [x] 精确匹配（完全相等）
+- [x] 通配符匹配（fnmatch）
+- [x] 正则匹配（re.search）
+- [x] 相关度评分（精确100 > 前缀80 > 词边界60 > 子串40）
+- [x] 预过滤优化（从通配符/正则中提取字面量用于 SQL 预过滤）
+- [x] SQLite 索引 + 内存缓存（SearchCache）
+- [x] 文件大小过滤（SearchCache 已支持 size_min/size_max）
 
-#### P0 MVP 阶段 ✅ 已完成
+**文件内容搜索（core/content_searcher.py）：**
+- [x] 关键词搜索（大小写敏感/不敏感）
+- [x] 多线程并发搜索（ThreadPoolExecutor, max_workers=4）
+- [x] 搜索取消（_canceled 标志 + cancel_futures）
+- [x] 上下文行提取（匹配行前后各3行）
+- [x] 进度信号通知（progress_updated / result_found / search_completed）
 
-- [x] 文件名模糊搜索
-- [x] 纯文本内容搜索（.txt, .md, .log, .json, .xml 等）
-- [x] 搜索结果列表展示
-- [x] 双击打开文件
-- [x] 基础设置（搜索目录、排除目录）
-- [x] 联合搜索（文件名 + 内容 AND 组合）
-- [x] 磁盘扫描索引（SQLite 持久化）
-- [x] 文件系统监控（自动同步索引）
-- [x] 文件类型筛选（9 大分类）
-- [x] 搜索范围选择
-- [x] 右键菜单（打开/打开目录/复制路径）
-- [x] 拖拽文件
+**搜索调度（core/search_engine.py）：**
+- [x] 统一搜索入口
+- [x] 联合搜索（文件名 ∩ 内容 取交集）
+- [x] 结果排序（按 score 降序）
 - [x] 搜索取消
-- [x] 区分大小写
 
-#### P1 增强阶段 🔄 开发中
+**磁盘扫描与索引（database/db_manager.py）：**
+- [x] SQLite 持久化索引（file_index_cache 表）
+- [x] 内存缓存（SearchCache，线程安全，启动时全表加载）
+- [x] WAL 模式 + PRAGMA 优化（16MB 缓存 + 64MB 内存映射）
+- [x] 批量写入（500条/批 commit）
+- [x] 增量同步（add_file_entry / delete_file_entry / update_file_entry）
+- [x] name_stem 字段迁移
+- [x] 文件系统监控（QFileSystemWatcher + 增量同步）
 
-- [ ] PDF/Word/Excel 解析（PyMuPDF / python-docx / openpyxl）
-- [ ] 内容预览 + 高亮显示
-- [ ] 搜索历史（DAO 修复 + UI 集成）
-- [ ] 正则表达式搜索
-- [ ] 高级过滤（文件大小/修改日期范围）
-- [ ] 结果排序优化（相关度/时间/大小/名称）
+**UI 组件：**
+- [x] 主窗口布局（QStackedWidget 管理欢迎页/扫描页/搜索页）
+- [x] 搜索栏（双输入框 + 4种匹配模式切换 + 大小写复选框 + 防抖器）
+- [x] 结果列表（自定义 ResultItemWidget + SVG 图标 + 分批渲染 + 加载更多）
+- [x] 筛选栏（9大分类 + 子分类滑块 + 排序方式 + 升降序）
+- [x] 预览面板（文本/代码/图片/PDF/Excel/Markdown/HTML/视频/音频/压缩包/文件夹）
+- [x] 搜索关键词高亮（preview_panel.py 中 _highlight_matches）
+- [x] 代码语法高亮（Python/JS/Markdown/JSON/通用代码）
+- [x] 圆角右键菜单（打开/复制/复制路径/属性）
+- [x] 拖拽文件（自定义拖拽 pixmap）
+- [x] 欢迎页 + 扫描进度
+- [x] 搜索范围选择（树形目录选择器）
+- [x] 加载动画（旋转点动画）
+- [x] 集中化样式系统（style_constants.py 令牌 + style_manager.py QSS 生成）
+- [x] 现代化对话框基类（modern_dialog.py，阴影/动画/拖拽）
+- [x] FILE_ICON_MAP 集中定义（style_constants.py，不再重复）
 
-**P1 阶段禁止添加的功能：**
-- 系统托盘（P2）
-- 全局快捷键（P2）
-- 主题切换（P2）
-- 倒排索引（P2）
+**数据层：**
+- [x] 搜索历史 DAO（add / get / delete / clear）
+- [x] 设置 DAO（save / load / dict 批量操作）
+- [x] 配置管理（config.py，JSON 文件读写 + 扫描状态管理）
 
-#### P2 完善阶段
+**工具函数：**
+- [x] 编码检测（BOM + charset_normalizer）
+- [x] 文本文件读取（大小限制 + 编码检测 + errors='replace'）
+- [x] 二进制文件检测（空字节 + 非文本字符判断，已修复）
+- [x] 防抖器（Debouncer，QTimer 实现，已集成到 SearchBar）
+- [x] 流式布局（FlowLayout，用于筛选栏标签排列）
+
+#### ❌ 未完成功能
+
+**P1 增强功能（当前阶段）：**
+
+| 功能 | 说明 | 涉及文件 | 备注 |
+|------|------|---------|------|
+| PDF 内容搜索 | 在 file_parser.py 中实现 PDFParser，注册到 ParserRegistry | `core/file_parser.py` | 预览已支持 PDF，但搜索内容时无法解析 |
+| Word 内容搜索 | 在 file_parser.py 中实现 DocxParser | `core/file_parser.py` | python-docx 已在依赖中 |
+| Excel 内容搜索 | 在 file_parser.py 中实现 XlsxParser | `core/file_parser.py` | 预览已支持 Excel，但搜索内容时无法解析 |
+| Word 文档预览 | 在 preview_panel.py 中添加 Word 预览方法 | `ui/widgets/preview_panel.py` | python-docx 已在依赖中 |
+| 搜索历史 UI | 搜索栏历史下拉列表 + 自动保存 + 删除/清空 | `ui/widgets/search_bar.py`, `ui/main_window.py` | DAO 层已完成 |
+| 内容正则搜索 | content_searcher.py 支持 content_mode='regex' | `core/content_searcher.py` | 文件名正则已实现 |
+| 文件大小过滤 UI | 在筛选栏添加大小范围控件 | `ui/widgets/filter_bar.py` | SearchQuery 已有 size_min/size_max 字段 |
+| 修改日期过滤 | SearchCache.search() 处理 date_from/date_to + UI 控件 | `database/db_manager.py`, `ui/widgets/filter_bar.py` | SearchQuery 已有字段但未使用 |
+
+**P1 代码重构（高优先级）：**
+
+| 任务 | 说明 | 涉及文件 |
+|------|------|---------|
+| 拆分 main_window.py | 约3300行含15个类，需提取 ScanWorker/SearchWorker/WelcomePage/ScanProgressDialog/SearchScopePanel 等为独立模块 | `ui/main_window.py` |
+| 提取重复的 _ModernMessageBox | main_window.py / filter_bar.py / settings_dialog.py 各有一份几乎相同的实现 | 多个文件 |
+| 提取重复的 AnimatedRadioButton | main_window.py / search_bar.py / filter_bar.py 各有一份 | 多个文件 |
+| 设置对话框持久化 | SettingsDialog 的控件值变化后未保存到数据库或配置文件 | `ui/dialogs/settings_dialog.py` |
+
+**P2 完善功能：**
 
 - [ ] 系统托盘 + 全局快捷键
-- [ ] 主题切换（浅色/深色）
+- [ ] 主题切换（浅色/深色/跟随系统）
 - [ ] 窗口位置记忆
 - [ ] 全文索引（倒排索引，借鉴 AnyTXT）
 - [ ] mmap 流式搜索（借鉴 AnyTXT）
 - [ ] 搜索性能优化
+- [ ] PPT 内容搜索 + 预览
+- [ ] 打包发布（PyInstaller）
+
+**P1 阶段禁止添加的功能：**
+- 系统托盘（P2）
+- 全局快捷键（P2）
+- 倒排索引（P2）
+- mmap 流式搜索（P2）
 
 ### 2.4 配置管理规范
 
-**所有可配置项必须写入 `config.py` 或 `constants.py`，禁止硬编码：**
+**所有可配置项必须写入 `config.py`、`constants.py` 或 `style_constants.py`，禁止硬编码：**
 
 ```python
 # ✅ 正确：在 config.py 中定义
@@ -172,11 +242,19 @@ TEXT_EXTENSIONS = {'.txt', '.md', '.log', ...}
 CODE_EXTENSIONS = {'.py', '.js', '.ts', ...}
 SEARCH_DEBOUNCE_MS = 300
 MAX_WORKERS = 4
-BATCH_SIZE = 100
+BATCH_SIZE = 500
+
+# ✅ 正确：在 style_constants.py 中定义
+FILE_ICON_MAP = {'.py': 'python', '.js': 'javascript', ...}
 
 # ❌ 错误：在业务代码中硬编码
 if directory not in ['node_modules', '__pycache__']:  # 硬编码
 ```
+
+**样式管理规范：**
+- 所有颜色、字号、圆角、间距等视觉参数必须定义在 `style_constants.py` 的令牌类中
+- 所有 QSS 样式字符串必须通过 `style_manager.py` 的函数生成，引用令牌而非硬编码
+- 修改视觉样式时只改 `style_constants.py`，组件自动更新
 
 ---
 
@@ -193,6 +271,7 @@ if directory not in ['node_modules', '__pycache__']:  # 硬编码
 | 私有属性 | `_前缀 + snake_case` | `_search_engine`, `_config` |
 | 文件名 | snake_case.py | `file_parser.py`, `name_searcher.py` |
 | Qt Signal | snake_case | `result_found`, `search_completed` |
+| 样式令牌类 | PascalCase + Tokens 后缀 | `ColorTokens`, `FontTokens` |
 
 ### 3.2 函数设计规范
 
@@ -318,17 +397,18 @@ logger.error("解析失败: %s", path, exc_info=True)  # 记录堆栈
 | 完成后 | 集成测试 | 完整搜索流程端到端 |
 | 发布前 | 回归测试 | 确保新功能不破坏已有功能 |
 
-### 4.2 手动测试清单
+**当前状态：项目没有任何自动化测试文件，全部依赖手动测试。**
 
-**P0 MVP 必须通过的测试用例：**
+### 4.2 手动测试清单
 
 #### 文件名搜索测试
 
 | 用例 | 操作步骤 | 预期结果 |
 |------|---------|---------|
 | 模糊匹配 | 搜索 `readme` | 返回所有包含 `readme` 的文件 |
-| 精确匹配 | 搜索 `main.py` | 只返回 `main.py` |
-| 空搜索 | 搜索框留空 | 显示所有文件或提示输入关键词 |
+| 精确匹配 | 切换到精确模式，搜索 `main.py` | 只返回 `main.py` |
+| 通配符匹配 | 切换到通配符模式，搜索 `*.py` | 返回所有 .py 文件 |
+| 正则匹配 | 切换到正则模式，搜索 `test_\d+` | 返回匹配正则的文件 |
 | 无结果 | 搜索不存在的文件名 | 显示「未找到匹配文件」 |
 
 #### 内容搜索测试
@@ -339,6 +419,17 @@ logger.error("解析失败: %s", path, exc_info=True)  # 记录堆栈
 | 大小写不敏感 | 搜索 `HELLO` | 匹配 `hello`, `Hello`, `HELLO` |
 | 大小写敏感 | 勾选「区分大小写」，搜索 `HELLO` | 只匹配 `HELLO` |
 | 二进制跳过 | 搜索包含在 .dll 中的文本 | 自动跳过，不报错 |
+
+#### 预览面板测试
+
+| 用例 | 操作步骤 | 预期结果 |
+|------|---------|---------|
+| 文本预览 | 选中 .txt/.py 文件 | 显示文件内容 + 语法高亮 |
+| 搜索高亮 | 内容搜索后选中结果 | 预览中高亮匹配关键词 |
+| PDF 预览 | 选中 .pdf 文件 | 渲染 PDF 页面，支持缩放 |
+| Excel 预览 | 选中 .xlsx 文件 | 显示表格内容，支持 Sheet 切换 |
+| 图片预览 | 选中 .png/.jpg 文件 | 显示图片，支持缩放和拖拽 |
+| Markdown 预览 | 选中 .md 文件 | 渲染 Markdown，支持预览/源码切换 |
 
 #### 编码测试
 
@@ -355,6 +446,7 @@ logger.error("解析失败: %s", path, exc_info=True)  # 记录堆栈
 | 响应速度 | 在 10 万文件目录下搜索 | 响应时间 ≤ 3 秒 |
 | UI 响应 | 搜索过程中点击界面 | 界面不卡顿，可取消搜索 |
 | 内存占用 | 搜索完成后 | 内存占用 ≤ 200MB |
+| 分批渲染 | 搜索返回大量结果 | 初始显示200条，底部"加载更多" |
 
 ### 4.3 边界情况测试
 
@@ -387,8 +479,9 @@ test_data/
 │   ├── utils.py
 │   └── test.js
 ├── documents/
-│   ├── sample.pdf      (P1 阶段准备)
-│   └── sample.docx     (P1 阶段准备)
+│   ├── sample.pdf
+│   ├── sample.docx
+│   └── sample.xlsx
 ├── special/
 │   ├── file[1].txt     # 含特殊字符
 │   └── 文件名中文.txt   # 中文文件名
@@ -409,6 +502,7 @@ test_data/
 | **增量开发** | 每个功能独立开发、独立测试 | ⭐⭐⭐⭐ |
 | **最小依赖** | 优先使用标准库，减少外部依赖 | ⭐⭐⭐⭐ |
 | **本地优先** | 所有数据存储在本地，不上传网络 | ⭐⭐⭐⭐⭐ |
+| **样式集中管理** | 所有视觉参数通过 style_constants.py 令牌管理，禁止组件内硬编码 | ⭐⭐⭐⭐ |
 
 ### 5.2 性能注意事项
 
@@ -422,6 +516,8 @@ test_data/
 | 线程数 | 4 个 | 限制并发 |
 | 内存占用 | 200MB | 释放缓存 |
 | 批量写入 | 500 条/批 | 数据库批量 commit |
+| 分批渲染 | 50 条/批 | UI 分批添加结果项 |
+| 初始显示 | 200 条 | 结果列表初始显示条数 |
 
 **禁止在主线程执行耗时操作：**
 
@@ -446,7 +542,7 @@ def search_async():
 | 倒排索引 | 构建词项→文件映射，搜索复杂度从 O(N) 降为 O(1) | P2 |
 | 增量索引 | 文件变化时只更新差异部分，避免全量重建 | 已部分实现 |
 | 分块读取 | 大文件分块读取，避免一次性加载到内存 | P2 |
-| 结果分批渲染 | 搜索结果分批加载到 UI，避免一次性渲染大量数据 | P1 |
+| 结果分批渲染 | 搜索结果分批加载到 UI，避免一次性渲染大量数据 | ✅ 已实现 |
 
 ### 5.3 安全注意事项
 
@@ -477,7 +573,8 @@ def safe_resolve(path: str) -> Path:
 | **可中断** | 用户可随时取消正在进行的搜索 | ✅ |
 | **错误友好** | 出错时显示友好提示，不显示技术堆栈 | ✅ |
 | **状态可见** | 状态栏显示索引状态、搜索耗时 | ✅ |
-| **窗口记忆** | 记住窗口大小和位置，下次启动恢复 | 🔄 P2 |
+| **分批渲染** | 大量结果分批加载，避免界面卡顿 | ✅ |
+| **窗口记忆** | 记住窗口大小和位置，下次启动恢复 | ❌ P2 |
 
 ### 5.5 兼容性注意事项
 
@@ -499,20 +596,36 @@ def safe_resolve(path: str) -> Path:
 | 资源泄漏 | 打开文件未关闭 | 使用 `with` 语句 |
 | 竞态条件 | 搜索过程中目录变化 | 使用文件锁或快照 |
 | GUI 框架混淆 | 使用 PyQt6 的 API | 本项目使用 **PySide6**，注意 Signal/Slot 差异 |
+| 样式硬编码 | 在组件中直接写颜色/字号 | 使用 `style_constants.py` 令牌 + `style_manager.py` 生成 |
+| 组件重复定义 | 多个文件中复制粘贴相同组件 | 提取为公共模块，统一导入 |
 
 ### 5.7 已知 Bug 与技术债务
 
 **开发时必须注意的已知问题：**
 
-| 问题 | 位置 | 说明 |
-|------|------|------|
-| `history_dao.py` 调用不存在的方法 | `database/history_dao.py` | 调用 `DatabaseManager().get_connection()` 但该方法不存在 |
-| `settings_dao.py` 同上 | `database/settings_dao.py` | 同上 |
-| `is_binary_file()` 逻辑反转 | `utils/path_helper.py` | 非文本字符判断条件反了 |
-| `main_window.py` 过于臃肿 | `ui/main_window.py`（2718 行） | 包含多个应独立的组件，需重构 |
-| `_styled_msg_box` 重复实现 | 多个文件 | 应提取为公共组件 |
-| `FILE_ICON_MAP` 重复定义 | result_list.py + preview_panel.py | 应提取为公共常量 |
-| Debouncer 未集成 | `utils/thread_helper.py` | 防抖器已实现但 SearchBar 未使用 |
+| 问题 | 位置 | 说明 | 优先级 |
+|------|------|------|--------|
+| `main_window.py` 过于臃肿 | `ui/main_window.py`（~3300行，15个类） | 包含 ScanWorker/SearchWorker/WelcomePage/ScanProgressDialog/SearchScopePanel 等应独立的组件 | 🔴 高 |
+| `_ModernMessageBox` 重复3次 | main_window.py / filter_bar.py / settings_dialog.py | 几乎相同的实现，应提取为公共组件 | 🟡 中 |
+| `AnimatedRadioButton` 重复3次 | main_window.py / search_bar.py / filter_bar.py | 几乎相同的实现，应提取为公共组件 | 🟡 中 |
+| 设置对话框未持久化 | `ui/dialogs/settings_dialog.py` | 控件值变化后未保存到数据库或配置文件 | 🟡 中 |
+| PDF/Word/Excel 内容搜索未实现 | `core/file_parser.py` | ParserRegistry 中只有 TextParser，搜索时无法解析文档格式 | 🔴 高 |
+| Word 文档预览未实现 | `ui/widgets/preview_panel.py` | python-docx 已在依赖中但无预览方法 | 🟠 高 |
+| 内容搜索不支持正则 | `core/content_searcher.py` | 使用 `re.escape(pattern)` 强制转义，content_mode 字段未使用 | 🟡 中 |
+| 日期范围过滤未实现 | `database/db_manager.py` SearchCache | SearchQuery 有 date_from/to 字段但 SearchCache.search() 未处理 | 🟡 中 |
+| 文件大小过滤 UI 未实现 | `ui/widgets/filter_bar.py` | SearchQuery 有 size_min/size_max 字段但 UI 无控件 | 🟡 中 |
+| 搜索历史 UI 未集成 | `ui/widgets/search_bar.py` | DAO 层功能完整但搜索栏无历史下拉框 | 🟡 中 |
+| history_dao / settings_dao 访问私有方法 | `database/history_dao.py`, `database/settings_dao.py` | 使用 `db._get_conn()` 访问私有方法获取连接，功能可用但不规范 | 🟢 低 |
+
+**已修复的旧 Bug（无需再处理）：**
+
+| 问题 | 位置 | 修复说明 |
+|------|------|---------|
+| ~~`history_dao.py` 调用不存在的方法~~ | `database/history_dao.py` | 已改为 `db._get_conn()` |
+| ~~`settings_dao.py` 同上~~ | `database/settings_dao.py` | 已改为 `db._get_conn()` |
+| ~~`is_binary_file()` 逻辑反转~~ | `utils/path_helper.py` | 已修复，当前逻辑正确 |
+| ~~`FILE_ICON_MAP` 重复定义~~ | result_list.py + preview_panel.py | 已集中定义在 `style_constants.py` |
+| ~~Debouncer 未集成~~ | `ui/widgets/search_bar.py` | 已集成到 SearchBar |
 
 ---
 
@@ -526,11 +639,13 @@ def safe_resolve(path: str) -> Path:
 - [ ] 所有函数有类型注解
 - [ ] 异常已捕获，有友好提示
 - [ ] 没有硬编码的可配置项
+- [ ] 没有硬编码的样式值（颜色/字号/圆角等必须用 style_constants 令牌）
 - [ ] 搜索功能在 UI 线程外执行
 - [ ] 手动测试核心用例通过
 - [ ] 日志级别使用正确
 - [ ] 无网络请求代码
 - [ ] 使用 PySide6 而非 PyQt6 的 API
+- [ ] 没有重复定义的组件（如 _ModernMessageBox、AnimatedRadioButton）
 
 ### B. 调试技巧
 
@@ -542,6 +657,8 @@ def safe_resolve(path: str) -> Path:
 | 编码乱码 | 使用 `encoding.py` 中的 `detect_file_encoding()` 检测 |
 | 内存占用高 | 检查是否有大文件被一次性加载，添加大小限制 |
 | 数据库操作失败 | 检查 `DatabaseManager` 单例是否正确初始化 |
+| 样式不生效 | 检查是否使用了 style_constants 令牌而非硬编码值 |
+| 预览面板异常 | 检查对应文件解析器是否正确注册 |
 
 ### C. 参考资源
 
@@ -551,4 +668,7 @@ def safe_resolve(path: str) -> Path:
 | Python 编码指南 | PEP 8 - https://pep8.org/ |
 | PyInstaller 文档 | https://pyinstaller.org/en/stable/ |
 | charset-normalizer | https://charset-normalizer.readthedocs.io/ |
+| PyMuPDF (fitz) | https://pymupdf.readthedocs.io/ |
+| python-docx | https://python-docx.readthedocs.io/ |
+| openpyxl | https://openpyxl.readthedocs.io/ |
 | AnyTXT Searcher | https://anytxt.net/ （全文索引设计参考） |

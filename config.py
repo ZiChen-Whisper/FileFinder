@@ -8,7 +8,7 @@ DEFAULT_CONFIG = {
         "language": "zh_CN",
         "auto_start": False,
         "minimize_to_tray": True,
-        "global_shortcut": "Ctrl+Alt+F"
+        "global_shortcut": "Ctrl+Shift+F"
     },
     "search": {
         "default_dirs": [],
@@ -161,6 +161,51 @@ def clear_scan_status() -> None:
     """清除所有扫描状态记录。"""
     config = load_config()
     config.setdefault("search", {})["scan_status"] = {}
+    save_config(config)
+
+def get_theme() -> str:
+    """获取界面主题设置"""
+    config = load_config()
+    return config.get("general", {}).get("theme", "system")
+
+def set_theme(theme: str) -> None:
+    """设置界面主题"""
+    config = load_config()
+    config.setdefault("general", {})["theme"] = theme
+    save_config(config)
+
+def get_language() -> str:
+    """获取语言设置"""
+    config = load_config()
+    return config.get("general", {}).get("language", "zh_CN")
+
+def set_language(lang: str) -> None:
+    """设置语言"""
+    config = load_config()
+    config.setdefault("general", {})["language"] = lang
+    save_config(config)
+
+def get_global_shortcut() -> str:
+    """获取全局快捷键设置"""
+    config = load_config()
+    return config.get("general", {}).get("global_shortcut", "Ctrl+Shift+F")
+
+def set_global_shortcut(shortcut: str) -> None:
+    """设置全局快捷键"""
+    config = load_config()
+    config.setdefault("general", {})["global_shortcut"] = shortcut
+    save_config(config)
+
+def set_max_results(max_results: int) -> None:
+    """设置最大搜索结果数"""
+    config = load_config()
+    config.setdefault("search", {})["max_results"] = max_results
+    save_config(config)
+
+def set_content_max_size_mb(size_mb: int) -> None:
+    """设置内容搜索最大文件大小"""
+    config = load_config()
+    config.setdefault("search", {})["content_max_size_mb"] = size_mb
     save_config(config)
 
 def is_first_launch() -> bool:
