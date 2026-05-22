@@ -5,7 +5,7 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QStatusBar,
                              QLabel, QHBoxLayout, QMessageBox, QSplitter, QFrame,
                              QStackedWidget, QSizePolicy, QDialog, QProgressBar,
                              QPushButton, QCheckBox, QTreeWidget, QTreeWidgetItem,
-                             QLineEdit, QFileDialog, QApplication,
+                             QLineEdit, QFileDialog, QApplication, QMenu,
                              QListWidget, QListWidgetItem, QScrollArea, QAbstractItemView,
                              QTextEdit, QRadioButton, QButtonGroup, QGraphicsDropShadowEffect)
 from PySide6.QtCore import Qt, QThread, Signal, QTimer, QFileSystemWatcher, QPropertyAnimation, QEasingCurve, QRectF, QSize, QPointF, Property
@@ -229,6 +229,7 @@ class ScanWorker(QThread):
     error = Signal(str)
     dir_completed = Signal(str)
     dir_scanned = Signal(str)
+    file_found = Signal(str)
 
     SKIP_DIR_NAMES = frozenset({
         'node_modules', '__pycache__', '.git', '.svn', '.hg',
@@ -249,6 +250,9 @@ class ScanWorker(QThread):
         self._progress_interval = 0.3
         self._batch_size = 500
         self._total_dirs = 0
+        self._file_log_batch = []
+        self._file_log_interval = 0.1
+        self._last_file_log_time = 0
 
     def cancel(self):
         self._cancelled = True
@@ -289,9 +293,12 @@ class ScanWorker(QThread):
             from utils.path_helper import normalize_path
 
             db = DatabaseManager()
-            db.clear_index()
 
             normalized_dirs = [normalize_path(d) for d in self._search_dirs]
+
+            # 只清除当前扫描目录的索引，保留其他目录的索引
+            for d in normalized_dirs:
+                db.delete_entries_by_prefix(d)
 
             for d in normalized_dirs:
                 set_scan_status(d, SCAN_STATUS_SCANNING)
@@ -303,7 +310,9 @@ class ScanWorker(QThread):
             if self._cancelled:
                 for d in normalized_dirs:
                     set_scan_status(d, SCAN_STATUS_INCOMPLETE)
-                db.clear_index()
+                # 取消时只清除当前扫描目录的索引
+                for d in normalized_dirs:
+                    db.delete_entries_by_prefix(d)
                 return
 
             total_files = 0
@@ -376,6 +385,13 @@ class ScanWorker(QThread):
                                 0
                             ))
                             file_count += 1
+                            self._file_log_batch.append(file_path)
+                            now = time.time()
+                            if len(self._file_log_batch) >= 50 or now - self._last_file_log_time >= self._file_log_interval:
+                                for fp in self._file_log_batch:
+                                    self.file_found.emit(fp)
+                                self._file_log_batch.clear()
+                                self._last_file_log_time = now
 
                             parent = root
                             dir_sizes.setdefault(parent, 0)
@@ -399,7 +415,9 @@ class ScanWorker(QThread):
             if self._cancelled:
                 for d in normalized_dirs:
                     set_scan_status(d, SCAN_STATUS_INCOMPLETE)
-                db.clear_index()
+                # 取消时只清除当前扫描目录的索引
+                for d in normalized_dirs:
+                    db.delete_entries_by_prefix(d)
                 return
 
             if batch:
@@ -416,6 +434,12 @@ class ScanWorker(QThread):
                 db.update_folder_sizes(dir_sizes, skip_cache_invalidate=True)
 
             db._search_cache.invalidate()
+
+            # 刷新剩余的文件日志
+            if self._file_log_batch:
+                for fp in self._file_log_batch:
+                    self.file_found.emit(fp)
+                self._file_log_batch.clear()
 
             total_files = dir_count + file_count
             for d in normalized_dirs:
@@ -725,6 +749,7 @@ class ScanProgressDialog(QWidget):
         self._scan_start_time = time.time()
         self._last_logged_dir = ""
         self._scan_log.clear()
+        self._file_log_count = 0
 
     def update_progress(self, count: int, percentage: int = None, current_dir: str = ""):
         self._detail.setText(f"已发现 {count:,} 个文件")
@@ -770,6 +795,27 @@ class ScanProgressDialog(QWidget):
                 pct = 95
             self._progress_bar.setValue(pct)
             self._percentage.setText(f"{pct}%")
+
+    def append_file_log(self, file_path: str):
+        """
+        追加单个文件的扫描记录到日志。
+
+        Args:
+            file_path: 被扫描到的文件路径
+        """
+        self._file_log_count += 1
+        filename = os.path.basename(file_path)
+        # 使用 append 逐条添加，QTextEdit 会自动处理 HTML
+        self._scan_log.append(
+            f"<span style='color: {COLORS.TEXT_PLACEHOLDER}; font-size: 11px;'>"
+            f"[{self._file_log_count:,}]</span> {filename} "
+            f"<span style='color: {COLORS.TEXT_PLACEHOLDER}; font-size: 11px;'>"
+            f"{file_path}</span>"
+        )
+        # 每隔一定数量自动滚动，避免频繁滚动影响性能
+        if self._file_log_count % 10 == 0:
+            sb = self._scan_log.verticalScrollBar()
+            sb.setValue(sb.maximum())
 
     def set_finishing(self):
         self._progress_bar.setMaximum(100)
@@ -1307,7 +1353,7 @@ class SearchScopePanel(QWidget):
         radio_row.setSpacing(12)
 
         self._scope_radio_group = QButtonGroup(self)
-        self._all_radio = AnimatedRadioButton("全部已扫描目录", font_pt=FONT.MICRO_PT)
+        self._all_radio = AnimatedRadioButton("全部搜索路径", font_pt=FONT.MICRO_PT)
         self._all_radio.setChecked(True)
         self._all_radio.setCursor(Qt.CursorShape.PointingHandCursor)
         self._scope_radio_group.addButton(self._all_radio)
@@ -1517,7 +1563,7 @@ class SearchScopePanel(QWidget):
             dot_tip = "部分目录未完成扫描"
         else:
             dot_color = COLORS.SUCCESS
-            dot_tip = "已扫描"
+            dot_tip = "已索引"
         self._status_dot.setStyleSheet(f"""
             QLabel {{
                 border-radius: 4px;
@@ -1531,7 +1577,7 @@ class SearchScopePanel(QWidget):
         if incomplete_count > 0:
             status_text = f" · {incomplete_count} 个目录未完成扫描"
 
-        header_text = f"{dir_count} 个目录" + (f" · 已索引 {self._indexed_count:,} 个文件" if self._indexed_count > 0 else " · 未扫描") + status_text
+        header_text = f"{dir_count} 个目录" + (f" · 已索引 {self._indexed_count:,} 个文件（索引仅加速文件名搜索）" if self._indexed_count > 0 else " · 未索引（扫描可加速文件名搜索）") + status_text
         self._status_label.setText(header_text)
         if incomplete_count > 0:
             self._status_label.setStyleSheet(f"font-size: {BTN.TAG_FONT_SIZE}; color: {COLORS.WARNING}; border: none; background: transparent;")
@@ -1557,7 +1603,7 @@ class SearchScopePanel(QWidget):
 
     def _update_scope_detail(self):
         if self._scope_mode == 'all':
-            self._scope_detail.setText(f"搜索所有已扫描目录（共 {len(self._scanned_dirs)} 个）")
+            self._scope_detail.setText(f"搜索所有路径（共 {len(self._scanned_dirs)} 个）")
         else:
             count = len(self._selected_dirs)
             total = len(self._custom_dir_list)
@@ -1761,6 +1807,23 @@ class SearchScopePanel(QWidget):
             added = new_set - old_dirs
             removed = old_dirs - new_set
 
+            # 删除被移除路径的索引记录和扫描状态
+            if removed:
+                from database.db_manager import DatabaseManager
+                db = DatabaseManager()
+                for d in removed:
+                    db.delete_entries_by_prefix(d)
+                # 更新索引计数
+                self._indexed_count = db.get_index_count()
+                # 清除被移除路径的扫描状态，以便加回时需要重新扫描
+                config = load_config()
+                scan_status = config.get("search", {}).get("scan_status", {})
+                for d in removed:
+                    normalized = os.path.normpath(d)
+                    scan_status.pop(normalized, None)
+                config["search"]["scan_status"] = scan_status
+                save_config(config)
+
             self._scanned_dirs = new_dirs
             self._search_dirs = list(new_dirs)
             if self._scope_mode == 'all':
@@ -1771,7 +1834,6 @@ class SearchScopePanel(QWidget):
             self._update_scope_info()
             self.scope_changed.emit(list(self._selected_dirs))
 
-            from config import load_config, save_config
             config = load_config()
             config["search"]["default_dirs"] = list(new_dirs)
             save_config(config)
@@ -1781,7 +1843,7 @@ class SearchScopePanel(QWidget):
                 if added:
                     msg_parts.append(f"新增 {len(added)} 个目录")
                 if removed:
-                    msg_parts.append(f"移除 {len(removed)} 个目录")
+                    msg_parts.append(f"移除 {len(removed)} 个目录（索引已删除）")
                 scan_btn_text = "新增扫描" if added else "重新扫描"
                 _styled_msg_box(
                     self, QMessageBox.Icon.Information,
@@ -2302,7 +2364,7 @@ class _ScopeSelectionDialog(ModernDialogBase):
             reply = _styled_msg_box(
                 self, QMessageBox.Icon.Question,
                 "目录未扫描",
-                f"目录不在已扫描范围内：\n{path}\n\n"
+                f"目录不在已索引范围内：\n{path}\n\n"
                 "是否添加到扫描路径并扫描？\n"
                 "（选择\"否\"则仅添加到选择列表，不会索引其中的文件）",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
@@ -2640,7 +2702,7 @@ class MainWindow(QMainWindow):
 
         file_menu = RoundedMenu(self)
         file_menu.setTitle("文件")
-        file_menu.setStyleSheet(menu_style())
+        file_menu.setStyleSheet(menu_style(rounded=True))
         exit_action = QAction("退出", self)
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
@@ -2648,7 +2710,7 @@ class MainWindow(QMainWindow):
 
         settings_menu = RoundedMenu(self)
         settings_menu.setTitle("设置")
-        settings_menu.setStyleSheet(menu_style())
+        settings_menu.setStyleSheet(menu_style(rounded=True))
         preferences_action = QAction("偏好设置", self)
         preferences_action.triggered.connect(self._on_open_settings)
         settings_menu.addAction(preferences_action)
@@ -2660,7 +2722,7 @@ class MainWindow(QMainWindow):
 
         help_menu = RoundedMenu(self)
         help_menu.setTitle("帮助")
-        help_menu.setStyleSheet(menu_style())
+        help_menu.setStyleSheet(menu_style(rounded=True))
         about_action = QAction("关于", self)
         about_action.triggered.connect(self._on_about)
         help_menu.addAction(about_action)
@@ -2671,7 +2733,7 @@ class MainWindow(QMainWindow):
             self, QMessageBox.Icon.Warning,
             "恢复默认设置",
             "此操作将删除所有用户自定义设置，包括：\n\n"
-            "  \u2022 所有已扫描目录的记录\n"
+            "  \u2022 所有搜索路径的记录\n"
             "  \u2022 所有用户偏好设置\n"
             "  \u2022 搜索历史记录\n"
             "  \u2022 文件索引数据库\n"
@@ -2841,7 +2903,20 @@ class MainWindow(QMainWindow):
         all_dirs = self._search_scope_panel.get_all_scanned_dirs()
         if not all_dirs:
             all_dirs = self._search_scope_panel.get_search_dirs()
-        self._do_scan(all_dirs)
+
+        # 只扫描未完成的新增目录，已完成的目录不需要重新扫描
+        from config import get_scan_status, SCAN_STATUS_COMPLETE
+        dirs_to_scan = []
+        for d in all_dirs:
+            status = get_scan_status(d)
+            if status != SCAN_STATUS_COMPLETE:
+                dirs_to_scan.append(d)
+
+        # 如果没有新增目录，则扫描所有目录（重新扫描）
+        if not dirs_to_scan:
+            dirs_to_scan = all_dirs
+
+        self._do_scan(dirs_to_scan)
 
     def _do_scan(self, search_dirs: list, exclude_dirs: list = None):
         if exclude_dirs is None:
@@ -2851,23 +2926,31 @@ class MainWindow(QMainWindow):
         self._scan_worker.progress.connect(self._on_scan_progress)
         self._scan_worker.finished.connect(self._on_scan_finished)
         self._scan_worker.error.connect(self._on_scan_error)
+        self._scan_worker.file_found.connect(self._on_scan_file_found)
         self._scan_worker.start()
 
     def _on_scan_progress(self, count: int, percentage: int, current_dir: str):
         self._scan_progress_page.update_progress(count, percentage if percentage >= 0 else None, current_dir)
         self.status_left.setText(f"正在扫描... 已发现 {count:,} 个文件")
 
+    def _on_scan_file_found(self, file_path: str):
+        self._scan_progress_page.append_file_log(file_path)
+
     def _on_scan_finished(self, total_files: int, elapsed: float):
         self._scan_progress_page.set_finishing()
 
-        self._search_scope_panel.reset_scan_state(total_files)
+        # 获取数据库中的实际索引总数（而非仅本次扫描数量）
+        from database.db_manager import DatabaseManager
+        actual_index_count = DatabaseManager().get_index_count()
+
+        self._search_scope_panel.reset_scan_state(actual_index_count)
 
         all_dirs = self._search_scope_panel.get_all_scanned_dirs()
         if not all_dirs:
             all_dirs = self._search_scope_panel.get_search_dirs()
         save_scanned_dirs(all_dirs)
         self._search_scope_panel.set_scanned_dirs(all_dirs)
-        self._search_scope_panel.update_scope_info(total_files)
+        self._search_scope_panel.update_scope_info(actual_index_count)
 
         config = load_config()
         existing_dirs = set(config.get("search", {}).get("default_dirs", []))
@@ -2879,7 +2962,7 @@ class MainWindow(QMainWindow):
         self._search_scope_panel._scanned_dirs = list(existing_dirs)
         self._search_scope_panel._search_dirs = list(existing_dirs)
 
-        self.status_left.setText(f"扫描完成 - 共 {total_files:,} 个文件，耗时 {elapsed:.1f} 秒")
+        self.status_left.setText(f"扫描完成 - 共 {actual_index_count:,} 个文件，耗时 {elapsed:.1f} 秒")
         self.status_right.setText("")
 
         self._update_fs_watcher_async()
@@ -2973,6 +3056,16 @@ class MainWindow(QMainWindow):
 
     def _on_search(self, name_query, content_query):
         if not name_query.strip() and not content_query.strip():
+            return
+
+        # 内容搜索模式暂未实现，显示提示
+        if content_query.strip() and not name_query.strip():
+            self._has_searched = True
+            self.result_list.clear_results()
+            self.result_list.hide_idle_state()
+            self.result_list.show_coming_soon("文件内容搜索功能即将上线，敬请期待")
+            self.status_left.setText("文件内容搜索功能开发中")
+            self.status_right.setText("")
             return
 
         if self._search_scope_panel.get_indexed_count() == 0:

@@ -1,10 +1,10 @@
 import os
 from PySide6.QtWidgets import (QListWidget, QListWidgetItem, QWidget, QVBoxLayout,
-                             QLabel, QHBoxLayout, QFrame, QMenu, QApplication,
+                             QLabel, QHBoxLayout, QFrame, QApplication,
                              QAbstractItemView, QProgressBar, QStackedWidget, QSizePolicy,
                              QPushButton)
-from PySide6.QtGui import QFont, QIcon, QFontMetrics, QDrag, QPixmap, QPainter, QColor, QRegion, QPainterPath, QPen
-from PySide6.QtCore import Qt, Signal, QSize, QMimeData, QUrl, QPoint, QRectF, QPropertyAnimation, QEasingCurve, QTimer
+from PySide6.QtGui import QFont, QIcon, QFontMetrics, QDrag, QPixmap, QPainter, QColor, QPen, QKeySequence, QPainterPath
+from PySide6.QtCore import Qt, Signal, QSize, QMimeData, QUrl, QPoint, QRectF, QTimer
 from models import SearchResult
 from ..style_constants import COLORS, FONT, RADIUS, BTN
 from ..style_manager import (
@@ -12,6 +12,7 @@ from ..style_manager import (
     progress_bar_style, label_caption_style, label_micro_style,
 )
 from ..style_constants import FILE_ICON_MAP
+from .rounded_menu import RoundedMenu
 
 
 class ElidedLabel(QLabel):
@@ -44,72 +45,6 @@ class ElidedLabel(QLabel):
         return QSize(0, super().minimumSizeHint().height())
 
 
-class RoundedMenu(QMenu):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowFlags(
-            self.windowFlags()
-            | Qt.WindowType.FramelessWindowHint
-            | Qt.WindowType.NoDropShadowWindowHint
-        )
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self._border_radius = 10
-        self._anim = QPropertyAnimation(self, b"windowOpacity")
-        self._anim.setDuration(120)
-        self._anim.setStartValue(0.0)
-        self._anim.setEndValue(1.0)
-        self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        shadow_rect = QRectF(self.rect()).adjusted(4, 4, -1, -1)
-        shadow_path = QPainterPath()
-        shadow_path.addRoundedRect(shadow_rect, self._border_radius + 2, self._border_radius + 2)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(0, 0, 0, 18))
-        painter.drawPath(shadow_path)
-
-        inner_shadow = QRectF(self.rect()).adjusted(3, 3, -2, -2)
-        inner_path = QPainterPath()
-        inner_path.addRoundedRect(inner_shadow, self._border_radius + 1, self._border_radius + 1)
-        painter.setBrush(QColor(0, 0, 0, 10))
-        painter.drawPath(inner_path)
-
-        path = QPainterPath()
-        rect = QRectF(self.rect()).adjusted(2, 2, -2, -2)
-        path.addRoundedRect(rect, self._border_radius, self._border_radius)
-        painter.setClipPath(path)
-
-        painter.setBrush(QColor(COLORS.BG_PRIMARY))
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawRoundedRect(rect, self._border_radius, self._border_radius)
-
-        painter.setClipping(False)
-
-        border_path = QPainterPath()
-        border_rect = QRectF(self.rect()).adjusted(1.5, 1.5, -1.5, -1.5)
-        border_path.addRoundedRect(border_rect, self._border_radius, self._border_radius)
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        pen = QPen(QColor(COLORS.BORDER_DEFAULT), 1)
-        pen.setCosmetic(True)
-        painter.setPen(pen)
-        painter.drawPath(border_path)
-        painter.end()
-
-        super().paintEvent(event)
-
-    def showEvent(self, event):
-        super().showEvent(event)
-        path = QPainterPath()
-        path.addRoundedRect(QRectF(self.rect()).adjusted(2, 2, -2, -2),
-                          self._border_radius, self._border_radius)
-        region = QRegion(path.toFillPolygon().toPolygon())
-        self.setMask(region)
-        self._anim.start()
-
-
 LIST_STYLE = f"""
     QListWidget {{
         background-color: {COLORS.BG_PRIMARY};
@@ -135,7 +70,7 @@ LIST_STYLE = f"""
 
 CENTER_PROGRESS_STYLE = progress_bar_style(8, 4)
 
-UNIFIED_MENU_STYLE = menu_style()
+UNIFIED_MENU_STYLE = menu_style(rounded=True)
 
 
 class ResultItemWidget(QFrame):
@@ -535,6 +470,11 @@ class ResultListWidget(QListWidget):
         if self._empty_widget:
             self._empty_widget.setVisible(False)
 
+    def show_coming_soon(self, text: str = "功能即将上线"):
+        """显示功能未实现的提示页面"""
+        self.hide_idle_state()
+        self.show_empty_state(text)
+
     def show_idle_state(self):
         """显示空闲引导页面（未搜索时）"""
         self.hide_empty_state()
@@ -726,19 +666,26 @@ class ResultListWidget(QListWidget):
         menu = RoundedMenu(self)
         menu.setStyleSheet(UNIFIED_MENU_STYLE)
 
-        open_action = menu.addAction(QIcon("icons/folder-open.svg"), "打开")
-        open_path_action = menu.addAction(QIcon("icons/folder-open.svg"), "打开文件所在目录")
+        open_action = menu.addAction("打开")
+        open_action.setShortcut(QKeySequence("Enter"))
+        copy_action = menu.addAction("复制")
+        copy_action.setShortcut(QKeySequence("Ctrl+C"))
+        copy_path_action = menu.addAction("复制文件地址")
+        copy_path_action.setShortcut(QKeySequence("Ctrl+Shift+C"))
         menu.addSeparator()
-        copy_path_action = menu.addAction(QIcon("icons/copy.svg"), "复制完整路径和文件名")
+        props_action = menu.addAction("属性")
+        props_action.setShortcut(QKeySequence("Alt+Enter"))
 
         action = menu.exec(self.mapToGlobal(pos))
 
         if action == open_action:
             self._open_file(result)
-        elif action == open_path_action:
-            self._open_file_path(result)
+        elif action == copy_action:
+            self._copy_file(result)
         elif action == copy_path_action:
             self._copy_path(result)
+        elif action == props_action:
+            self._show_properties(result)
 
     def _open_file(self, result: SearchResult):
         try:
@@ -760,14 +707,84 @@ class ResultListWidget(QListWidget):
         clipboard = QApplication.clipboard()
         clipboard.setText(result.file_item.path)
 
+    def _copy_file(self, result: SearchResult):
+        """复制文件到剪贴板（可粘贴到资源管理器）"""
+        try:
+            path = result.file_item.path
+            if not os.path.exists(path):
+                return
+            clipboard = QApplication.clipboard()
+            data = QMimeData()
+            data.setUrls([QUrl.fromLocalFile(path)])
+            clipboard.setMimeData(data)
+        except Exception:
+            clipboard = QApplication.clipboard()
+            clipboard.setText(result.file_item.path)
+
+    def _show_properties(self, result: SearchResult):
+        """弹出 Windows 自带的文件属性对话框"""
+        try:
+            import ctypes
+            from ctypes import wintypes
+            file_path = result.file_item.path
+            if not os.path.exists(file_path):
+                return
+            SEE_MASK_INVOKEIDLIST = 0x0000000C
+            class SHELLEXECUTEINFO(ctypes.Structure):
+                _fields_ = [
+                    ("cbSize", wintypes.DWORD),
+                    ("fMask", wintypes.ULONG),
+                    ("hwnd", wintypes.HWND),
+                    ("lpVerb", wintypes.LPCWSTR),
+                    ("lpFile", wintypes.LPCWSTR),
+                    ("lpParameters", wintypes.LPCWSTR),
+                    ("lpDirectory", wintypes.LPCWSTR),
+                    ("nShow", ctypes.c_int),
+                    ("hInstApp", wintypes.HINSTANCE),
+                    ("lpIDList", ctypes.c_void_p),
+                    ("lpClass", wintypes.LPCWSTR),
+                    ("hKeyClass", wintypes.HKEY),
+                    ("dwHotKey", wintypes.DWORD),
+                    ("hIconOrMonitor", wintypes.HANDLE),
+                    ("hProcess", wintypes.HANDLE),
+                ]
+            sei = SHELLEXECUTEINFO()
+            sei.cbSize = ctypes.sizeof(SHELLEXECUTEINFO)
+            sei.fMask = SEE_MASK_INVOKEIDLIST
+            sei.lpVerb = "properties"
+            sei.lpFile = file_path
+            sei.nShow = 1
+            ctypes.windll.shell32.ShellExecuteExW(ctypes.byref(sei))
+        except Exception:
+            pass
+
     def keyPressEvent(self, event):
+        # Alt+Enter: 属性
+        if event.key() == Qt.Key.Key_Return and event.modifiers() & Qt.KeyboardModifier.AltModifier:
+            result = self.get_selected_result()
+            if result:
+                self._show_properties(result)
+            return
+
+        # Ctrl+Shift+C: 复制文件地址
+        if event.key() == Qt.Key.Key_C and event.modifiers() & Qt.KeyboardModifier.ControlModifier and event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+            result = self.get_selected_result()
+            if result:
+                self._copy_path(result)
+            return
+
+        # Ctrl+C: 复制文件
+        if event.key() == Qt.Key.Key_C and event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            result = self.get_selected_result()
+            if result:
+                self._copy_file(result)
+            return
+
+        # Enter: 打开
         if event.key() == Qt.Key.Key_Return or event.key() == Qt.Key.Key_Enter:
             result = self.get_selected_result()
             if result:
-                if result.file_item.is_directory:
-                    os.startfile(result.file_item.path)
-                else:
-                    os.startfile(result.file_item.path)
+                self._open_file(result)
             return
 
         if event.key() == Qt.Key.Key_Down:

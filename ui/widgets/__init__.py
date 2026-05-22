@@ -1,5 +1,6 @@
 from .search_bar import SearchBar
-from .result_list import ResultListWidget, RoundedMenu
+from .result_list import ResultListWidget
+from .rounded_menu import RoundedMenu
 from .preview_panel import PreviewPanel
 from .filter_bar import FilterBar
 

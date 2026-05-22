@@ -827,16 +827,18 @@ def list_style() -> str:
     """ + scrollbar_style()
 
 
-def menu_style() -> str:
+def menu_style(rounded: bool = False) -> str:
+    """菜单样式。rounded=True 时背景透明、无边框，由 RoundedMenu.paintEvent 绘制。"""
+    bg = "transparent" if rounded else COLORS.BG_PRIMARY
+    border = "none" if rounded else f"1px solid {COLORS.BORDER_DEFAULT}"
     return f"""
     QMenu {{
-        background-color: {COLORS.BG_PRIMARY};
-        border: {BTN.BORDER_WIDTH} {BTN.BORDER_STYLE} {COLORS.BORDER_DEFAULT};
-        border-radius: {RADIUS.DEFAULT}px;
+        background-color: {bg};
+        border: {border};
         padding: 6px 4px;
     }}
     QMenu::item {{
-        padding: 8px 28px 8px 20px;
+        padding: 8px 16px 8px 16px;
         border-radius: {RADIUS.MEDIUM}px;
         font-size: {BTN.FONT_SIZE};
         color: {COLORS.TEXT_PRIMARY};
@@ -848,7 +850,9 @@ def menu_style() -> str:
         color: {COLORS.BRAND};
     }}
     QMenu::icon {{
-        padding-left: 8px;
+        width: 0px;
+        padding: 0px;
+        margin: 0px;
     }}
     QMenu::separator {{
         height: 1px;
@@ -858,6 +862,10 @@ def menu_style() -> str:
     QMenu::right-arrow {{
         width: 12px;
         height: 12px;
+    }}
+    QMenu::indicator {{
+        width: 0px;
+        height: 0px;
     }}
 """
 

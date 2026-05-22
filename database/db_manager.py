@@ -292,7 +292,12 @@ class DatabaseManager:
         conn = self._get_conn()
         try:
             cursor = conn.cursor()
-            like_pattern = prefix.replace('\\', '/').rstrip('/') + '/%'
+            # 规范化前缀路径
+            norm_prefix = os.path.normpath(prefix)
+            # 构建 LIKE 模式：转义路径中的特殊字符（\, %, _）
+            # ESCAPE '\\' 表示 \\ 为转义符，所以 \\% 匹配字面 %，\\\\ 匹配字义 \
+            escaped_prefix = norm_prefix.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+            like_pattern = escaped_prefix + '\\\\%'
             cursor.execute(
                 "DELETE FROM file_index_cache WHERE path LIKE ? ESCAPE '\\'",
                 (like_pattern,)
@@ -300,7 +305,7 @@ class DatabaseManager:
             deleted = cursor.rowcount
             cursor.execute(
                 "DELETE FROM file_index_cache WHERE path = ?",
-                (prefix,)
+                (norm_prefix,)
             )
             deleted += cursor.rowcount
             conn.commit()
@@ -322,10 +327,12 @@ class DatabaseManager:
         conn = self._get_conn()
         try:
             cursor = conn.cursor()
-            like_pattern = parent_dir.replace('\\', '/').rstrip('/') + '/%'
+            norm_dir = os.path.normpath(parent_dir)
+            escaped_dir = norm_dir.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+            like_pattern = escaped_dir + '\\\\%'
             cursor.execute(
                 "SELECT path FROM file_index_cache WHERE path LIKE ? ESCAPE '\\' OR path = ?",
-                (like_pattern, parent_dir)
+                (like_pattern, norm_dir)
             )
             return [row["path"] for row in cursor.fetchall()]
         finally:
