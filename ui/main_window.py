@@ -298,6 +298,10 @@ class MainWindow(QMainWindow):
         if self._search_worker and self._search_worker.isRunning():
             self._search_worker.cancel()
             self._search_worker.results_ready.disconnect(self._on_search_finished)
+            self._search_worker.progress_updated.disconnect(self._on_search_progress)
+            self._search_worker.result_found.disconnect(self._on_search_result_found)
+            self._search_worker.file_searching.disconnect(self._on_file_searching)
+            self._search_worker.wait()
 
         reset_all_settings()
 
@@ -350,6 +354,7 @@ class MainWindow(QMainWindow):
         self._search_scope_panel.scope_changed.connect(self._on_scope_changed)
         self._search_scope_panel.scan_unscanned_requested.connect(self._on_scan_unscanned)
         self.search_bar.search_triggered.connect(self._on_search)
+        self.search_bar.search_mode_changed.connect(self.filter_bar.set_search_mode)
         self.result_list.result_selected.connect(self._on_result_selected)
         self.result_list.status_info_requested.connect(self._update_status_info)
         self.filter_bar.filter_changed.connect(self._on_filter_changed)
@@ -470,11 +475,22 @@ class MainWindow(QMainWindow):
         self._scan_worker.finished.connect(self._on_scan_finished)
         self._scan_worker.error.connect(self._on_scan_error)
         self._scan_worker.file_found.connect(self._on_scan_file_found)
+        self._scan_worker.content_index_progress.connect(self._on_content_index_progress)
         self._scan_worker.start()
 
     def _on_scan_progress(self, count: int, percentage: int, current_dir: str):
         self._scan_progress_page.update_progress(count, percentage if percentage >= 0 else None, current_dir)
         self.status_left.setText(f"正在扫描... 已发现 {count:,} 个文件")
+
+    def _on_content_index_progress(self, indexed: int, total: int, current_file: str):
+        """处理内容索引进度信号。"""
+        if total > 0:
+            pct = int(indexed / total * 100)
+            self._scan_progress_page.update_progress(
+                indexed, pct,
+                f"正在索引内容: {os.path.basename(current_file)}" if current_file else "正在索引内容..."
+            )
+            self.status_left.setText(f"正在索引内容... {indexed:,}/{total:,} 个文件")
 
     def _on_scan_file_found(self, file_path: str):
         self._scan_progress_page.append_file_log(file_path)
@@ -484,7 +500,9 @@ class MainWindow(QMainWindow):
 
         # 获取数据库中的实际索引总数（而非仅本次扫描数量）
         from database.db_manager import DatabaseManager
-        actual_index_count = DatabaseManager().get_index_count()
+        db = DatabaseManager()
+        actual_index_count = db.get_index_count()
+        content_index_count = db.get_content_index_count()
 
         self._search_scope_panel.reset_scan_state(actual_index_count)
 
@@ -505,7 +523,12 @@ class MainWindow(QMainWindow):
         self._search_scope_panel._scanned_dirs = list(existing_dirs)
         self._search_scope_panel._search_dirs = list(existing_dirs)
 
-        self.status_left.setText(f"扫描完成 - 共 {actual_index_count:,} 个文件，耗时 {elapsed:.1f} 秒")
+        # 状态栏显示文件索引数 + 内容索引数
+        status_text = f"扫描完成 - 共 {actual_index_count:,} 个文件"
+        if content_index_count > 0:
+            status_text += f"，已索引 {content_index_count:,} 个文件内容"
+        status_text += f"，耗时 {elapsed:.1f} 秒"
+        self.status_left.setText(status_text)
         self.status_right.setText("")
 
         self._update_fs_watcher_async()
@@ -583,11 +606,11 @@ class MainWindow(QMainWindow):
                     is_directory=bool(row.get("is_directory", 0)),
                     item_count=row.get("item_count", 0)
                 )
-                if all_dirs and not any(
+                if self._selected_dirs and not any(
                     os.path.normcase(os.path.normpath(item.path)).startswith(
                         os.path.normcase(os.path.normpath(d)) + os.sep
                     ) or os.path.normcase(os.path.normpath(item.path)) == os.path.normcase(os.path.normpath(d))
-                    for d in all_dirs
+                    for d in self._selected_dirs
                 ):
                     continue
                 results.append(SearchResult(file_item=item, match_reason='name', name_match_score=0))
@@ -601,17 +624,11 @@ class MainWindow(QMainWindow):
         if not name_query.strip() and not content_query.strip():
             return
 
-        # 内容搜索模式暂未实现，显示提示
-        if content_query.strip() and not name_query.strip():
-            self._has_searched = True
-            self.result_list.clear_results()
-            self.result_list.hide_idle_state()
-            self.result_list.show_coming_soon("文件内容搜索功能即将上线，敬请期待")
-            self.status_left.setText("文件内容搜索功能开发中")
-            self.status_right.setText("")
-            return
+        has_name = bool(name_query.strip())
+        has_content = bool(content_query.strip())
 
-        if self._search_scope_panel.get_indexed_count() == 0:
+        # 文件名搜索需要索引，纯内容搜索不需要索引但需要搜索目录
+        if has_name and self._search_scope_panel.get_indexed_count() == 0:
             reply = styled_msg_box(
                 self, QMessageBox.Icon.Question,
                 "尚未扫描",
@@ -625,9 +642,13 @@ class MainWindow(QMainWindow):
 
         if self._search_worker and self._search_worker.isRunning():
             self._search_worker.cancel()
-            # 不调用 terminate() + wait()，避免阻塞主线程
             # 断开旧 worker 的信号，使其结果不会干扰新搜索
             self._search_worker.results_ready.disconnect(self._on_search_finished)
+            self._search_worker.progress_updated.disconnect(self._on_search_progress)
+            self._search_worker.result_found.disconnect(self._on_search_result_found)
+            self._search_worker.file_searching.disconnect(self._on_file_searching)
+            # 等待旧线程结束，避免 "QThread: Destroyed while thread is still running"
+            self._search_worker.wait()
 
         case_sensitive = self.search_bar.is_case_sensitive()
         all_dirs = self._search_scope_panel.get_all_scanned_dirs()
@@ -647,7 +668,7 @@ class MainWindow(QMainWindow):
             name_mode=self.search_bar.get_name_mode(),
             content_query=content_query if content_query else None,
             content_mode='keyword',
-            include_dirs=all_dirs if all_dirs else self._search_scope_panel.get_search_dirs(),
+            include_dirs=selected_dirs if selected_dirs else self._search_scope_panel.get_search_dirs(),
             exclude_dirs=get_exclude_dirs(),
             max_results=get_max_results(),
             name_case_sensitive=case_sensitive,
@@ -660,13 +681,29 @@ class MainWindow(QMainWindow):
         self.status_right.setText("")
         self._hide_loading()
         self._has_searched = True
+        self._all_results = []
         self.result_list.clear_results()
         self.result_list.hide_idle_state()
         self.result_list.show_search_progress("正在搜索...")
 
         self._search_worker = SearchWorker(query)
         self._search_worker.results_ready.connect(self._on_search_finished)
+        self._search_worker.progress_updated.connect(self._on_search_progress)
+        self._search_worker.result_found.connect(self._on_search_result_found)
+        self._search_worker.file_searching.connect(self._on_file_searching)
         self._search_worker.start()
+
+    def _on_search_progress(self, processed: int, total: int):
+        """处理搜索进度更新信号"""
+        self.result_list.update_search_progress(processed, total)
+
+    def _on_search_result_found(self, result):
+        """处理实时搜索结果信号（流式显示）"""
+        pass
+
+    def _on_file_searching(self, file_path: str):
+        """处理当前搜索文件信号"""
+        self.result_list.update_searching_file(file_path)
 
     def _on_search_finished(self, results):
         self._all_results = results
@@ -713,6 +750,13 @@ class MainWindow(QMainWindow):
             self.result_list.setFocus()
 
     def _on_result_selected(self, result):
+        # 传递搜索关键词到预览面板以实现高亮
+        content_query = self.search_bar.get_content_query() if hasattr(self.search_bar, 'get_content_query') else ""
+        if content_query:
+            case_sensitive = self.search_bar.is_case_sensitive()
+            self.preview_panel.set_search_keyword(content_query, case_sensitive)
+        else:
+            self.preview_panel.set_search_keyword("", False)
         self.preview_panel.set_result(result)
 
     def eventFilter(self, obj, event):
@@ -899,6 +943,9 @@ class MainWindow(QMainWindow):
                             size=stat.st_size if not is_dir else 0,
                             mtime=stat.st_mtime, is_dir=1 if is_dir else 0
                         )
+                        # 新增文件：同时更新内容索引
+                        if not is_dir and stat.st_size <= 10 * 1024 * 1024:
+                            self._update_content_index_for_file(db, full_path, item)
                     else:
                         db.update_file_entry(
                             old_path=full_path, new_name=item,
@@ -906,6 +953,9 @@ class MainWindow(QMainWindow):
                             new_size=stat.st_size if not is_dir else 0,
                             new_mtime=stat.st_mtime
                         )
+                        # 修改文件：更新内容索引
+                        if not is_dir and stat.st_size <= 10 * 1024 * 1024:
+                            self._update_content_index_for_file(db, full_path, item)
                 except (PermissionError, OSError):
                     continue
 
@@ -915,8 +965,45 @@ class MainWindow(QMainWindow):
                 if parent == dir_path and ep not in current_files:
                     if not os.path.exists(ep):
                         db.delete_file_entry(ep)
+                        # 删除文件时同时删除内容索引（delete_file_entry 已包含）
         except (PermissionError, OSError):
             pass
+
+    def _update_content_index_for_file(self, db, file_path: str, file_name: str):
+        """更新单个文件的内容索引（增量索引）。
+
+        当文件系统监控检测到文件新增或修改时调用。
+
+        Args:
+            db: DatabaseManager 实例
+            file_path: 文件路径
+            file_name: 文件名
+        """
+        try:
+            from core.file_parser import ParserRegistry
+            from utils.tokenizer import tokenize_for_fts5
+
+            parser_registry = ParserRegistry()
+            ext = os.path.splitext(file_name)[1].lower()
+
+            # 只索引可解析的文件
+            if not parser_registry.can_parse(file_path):
+                return
+
+            content_text = parser_registry.parse(file_path)
+            if not content_text or not content_text.strip():
+                # 文件无文本内容，删除旧索引
+                db.delete_content_entry(file_path)
+                return
+
+            content_tokenized = tokenize_for_fts5(content_text)
+            if not content_tokenized:
+                db.delete_content_entry(file_path)
+                return
+
+            db.update_content_entry(file_path, file_name, content_text, content_tokenized)
+        except Exception as e:
+            logger.debug(f"增量内容索引失败: {file_path}, {type(e).__name__}")
 
     def _refresh_current_search(self):
         name_query = self.search_bar.get_name_query()

@@ -10,6 +10,8 @@ class ContentMatch:
     match_end: int
     context_before: List[str] = field(default_factory=list)
     context_after: List[str] = field(default_factory=list)
+    page_number: int = 0
+    page_rect: tuple = ()
 
 @dataclass
 class SearchResult:

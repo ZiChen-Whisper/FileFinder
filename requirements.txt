@@ -5,3 +5,4 @@ openpyxl>=3.1.0
 python-pptx>=0.6.21
 charset-normalizer>=3.0.0
 markdown>=3.4.0
+jieba>=0.42.1

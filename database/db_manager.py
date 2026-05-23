@@ -180,6 +180,34 @@ class DatabaseManager:
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
+
+            # --- 内容全文索引表 ---
+            # 原始内容存储表（用于上下文提取）
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS file_content_raw (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    file_path TEXT UNIQUE NOT NULL,
+                    content_text TEXT,
+                    indexed_at REAL DEFAULT (julianday('now'))
+                )
+            ''')
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_content_raw_path ON file_content_raw(file_path)")
+
+            # FTS5 全文索引虚拟表
+            # 使用 standalone 模式（非外部内容），简单可靠
+            try:
+                cursor.execute('''
+                    CREATE VIRTUAL TABLE IF NOT EXISTS file_content_fts
+                    USING fts5(
+                        file_path,
+                        file_name,
+                        content,
+                        tokenize='unicode61'
+                    )
+                ''')
+            except sqlite3.OperationalError as e:
+                logger.warning(f"FTS5 虚拟表创建失败（可能不支持）: {e}")
+
             conn.commit()
         finally:
             conn.close()
@@ -220,6 +248,12 @@ class DatabaseManager:
         try:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM file_index_cache")
+            # 同时清除内容索引
+            cursor.execute("DELETE FROM file_content_raw")
+            try:
+                cursor.execute("DELETE FROM file_content_fts")
+            except sqlite3.OperationalError:
+                pass
             conn.commit()
         finally:
             conn.close()
@@ -281,7 +315,7 @@ class DatabaseManager:
 
     def delete_entries_by_prefix(self, prefix: str) -> int:
         """
-        删除指定路径前缀下的所有索引条目。
+        删除指定路径前缀下的所有索引条目（包括内容索引）。
 
         Args:
             prefix: 路径前缀
@@ -308,6 +342,20 @@ class DatabaseManager:
                 (norm_prefix,)
             )
             deleted += cursor.rowcount
+
+            # 同时删除内容索引
+            cursor.execute(
+                "DELETE FROM file_content_raw WHERE file_path LIKE ? ESCAPE '\\' OR file_path = ?",
+                (like_pattern, norm_prefix)
+            )
+            try:
+                cursor.execute(
+                    "DELETE FROM file_content_fts WHERE file_path LIKE ? ESCAPE '\\' OR file_path = ?",
+                    (like_pattern, norm_prefix)
+                )
+            except sqlite3.OperationalError:
+                pass
+
             conn.commit()
             self._search_cache.invalidate()
             return deleted
@@ -398,6 +446,12 @@ class DatabaseManager:
         try:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM file_index_cache WHERE path = ?", (path,))
+            # 同时删除内容索引
+            cursor.execute("DELETE FROM file_content_raw WHERE file_path = ?", (path,))
+            try:
+                cursor.execute("DELETE FROM file_content_fts WHERE file_path = ?", (path,))
+            except sqlite3.OperationalError:
+                pass
             conn.commit()
         finally:
             conn.close()
@@ -429,3 +483,259 @@ class DatabaseManager:
     def close(self):
         if hasattr(self, '_search_cache'):
             self._search_cache.invalidate()
+
+    # ========== 内容全文索引方法 ==========
+
+    def has_content_index(self) -> bool:
+        """检查是否存在内容索引。"""
+        return self.get_content_index_count() > 0
+
+    def get_content_index_count(self) -> int:
+        """获取内容索引条目数。"""
+        conn = self._get_conn()
+        try:
+            cursor = conn.cursor()
+            try:
+                cursor.execute("SELECT COUNT(*) FROM file_content_raw")
+                return cursor.fetchone()[0]
+            except sqlite3.OperationalError:
+                return 0
+        finally:
+            conn.close()
+
+    def insert_content_batch(self, rows: list, skip_cache_invalidate: bool = False):
+        """批量插入内容索引记录。
+
+        同时写入 file_content_raw（原始文本）和 file_content_fts（FTS5 索引）。
+
+        Args:
+            rows: 内容记录列表，每条格式为 (file_path, file_name, content_text, content_tokenized)
+            skip_cache_invalidate: 为 True 时跳过缓存失效
+        """
+        if not rows:
+            return
+        conn = self._get_conn()
+        try:
+            cursor = conn.cursor()
+            for file_path, file_name, content_text, content_tokenized in rows:
+                # 写入原始内容表
+                cursor.execute(
+                    "INSERT OR REPLACE INTO file_content_raw (file_path, content_text) VALUES (?, ?)",
+                    (file_path, content_text)
+                )
+                # 写入 FTS5 索引（先删除旧记录避免重复）
+                try:
+                    cursor.execute(
+                        "DELETE FROM file_content_fts WHERE file_path = ?",
+                        (file_path,)
+                    )
+                    cursor.execute(
+                        "INSERT INTO file_content_fts (file_path, file_name, content) VALUES (?, ?, ?)",
+                        (file_path, file_name, content_tokenized)
+                    )
+                except sqlite3.OperationalError as e:
+                    logger.debug(f"FTS5 写入失败: {file_path}, {e}")
+            conn.commit()
+        finally:
+            conn.close()
+
+    def insert_content_entry(self, file_path: str, file_name: str,
+                             content_text: str, content_tokenized: str):
+        """插入单条内容索引记录。
+
+        Args:
+            file_path: 文件路径
+            file_name: 文件名
+            content_text: 原始提取的文本内容
+            content_tokenized: jieba 分词后的文本
+        """
+        conn = self._get_conn()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT OR REPLACE INTO file_content_raw (file_path, content_text) VALUES (?, ?)",
+                (file_path, content_text)
+            )
+            try:
+                cursor.execute(
+                    "DELETE FROM file_content_fts WHERE file_path = ?",
+                    (file_path,)
+                )
+                cursor.execute(
+                    "INSERT INTO file_content_fts (file_path, file_name, content) VALUES (?, ?, ?)",
+                    (file_path, file_name, content_tokenized)
+                )
+            except sqlite3.OperationalError as e:
+                logger.debug(f"FTS5 写入失败: {file_path}, {e}")
+            conn.commit()
+        finally:
+            conn.close()
+
+    def delete_content_entry(self, file_path: str):
+        """删除指定文件的内容索引。
+
+        Args:
+            file_path: 文件路径
+        """
+        conn = self._get_conn()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM file_content_raw WHERE file_path = ?", (file_path,))
+            try:
+                cursor.execute("DELETE FROM file_content_fts WHERE file_path = ?", (file_path,))
+            except sqlite3.OperationalError:
+                pass
+            conn.commit()
+        finally:
+            conn.close()
+
+    def delete_content_by_prefix(self, prefix: str) -> int:
+        """删除指定路径前缀下的所有内容索引。
+
+        Args:
+            prefix: 路径前缀
+
+        Returns:
+            删除的行数
+        """
+        conn = self._get_conn()
+        try:
+            cursor = conn.cursor()
+            norm_prefix = os.path.normpath(prefix)
+            escaped_prefix = norm_prefix.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+            like_pattern = escaped_prefix + '\\\\%'
+            cursor.execute(
+                "DELETE FROM file_content_raw WHERE file_path LIKE ? ESCAPE '\\' OR file_path = ?",
+                (like_pattern, norm_prefix)
+            )
+            deleted = cursor.rowcount
+            try:
+                cursor.execute(
+                    "DELETE FROM file_content_fts WHERE file_path LIKE ? ESCAPE '\\' OR file_path = ?",
+                    (like_pattern, norm_prefix)
+                )
+            except sqlite3.OperationalError:
+                pass
+            conn.commit()
+            return deleted
+        finally:
+            conn.close()
+
+    def update_content_entry(self, file_path: str, file_name: str,
+                             content_text: str, content_tokenized: str):
+        """更新指定文件的内容索引。
+
+        Args:
+            file_path: 文件路径
+            file_name: 文件名
+            content_text: 原始提取的文本内容
+            content_tokenized: jieba 分词后的文本
+        """
+        self.insert_content_entry(file_path, file_name, content_text, content_tokenized)
+
+    def get_content_by_path(self, file_path: str) -> str:
+        """获取文件的原始文本内容（用于上下文提取）。
+
+        Args:
+            file_path: 文件路径
+
+        Returns:
+            原始文本内容，不存在返回 None
+        """
+        conn = self._get_conn()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT content_text FROM file_content_raw WHERE file_path = ?",
+                (file_path,)
+            )
+            row = cursor.fetchone()
+            return row["content_text"] if row else None
+        finally:
+            conn.close()
+
+    def search_content(self, query_tokenized: str, max_results: int = 1000) -> list:
+        """使用 FTS5 全文搜索，返回匹配的文件路径列表 + BM25 评分。
+
+        Args:
+            query_tokenized: 已分词的查询字符串（由 tokenize_query_for_fts5 生成）
+            max_results: 最大返回结果数
+
+        Returns:
+            [(file_path, bm25_score), ...] 列表
+        """
+        if not query_tokenized:
+            return []
+
+        conn = self._get_conn()
+        try:
+            cursor = conn.cursor()
+            try:
+                cursor.execute('''
+                    SELECT file_path, bm25(file_content_fts) as rank
+                    FROM file_content_fts
+                    WHERE file_content_fts MATCH ?
+                    ORDER BY rank
+                    LIMIT ?
+                ''', (query_tokenized, max_results))
+                return [(row["file_path"], row["rank"]) for row in cursor.fetchall()]
+            except sqlite3.OperationalError as e:
+                logger.warning(f"FTS5 搜索失败: {e}")
+                return []
+        finally:
+            conn.close()
+
+    def clear_content_index(self):
+        """清除所有内容索引。"""
+        conn = self._get_conn()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM file_content_raw")
+            try:
+                cursor.execute("DELETE FROM file_content_fts")
+            except sqlite3.OperationalError:
+                pass
+            conn.commit()
+        finally:
+            conn.close()
+
+    def get_files_for_content_indexing(self, path_prefix: str = None) -> list:
+        """获取需要建立内容索引的文件列表。
+
+        从 file_index_cache 中查询非目录、非超大文件的记录，
+        排除已有内容索引的文件（用于增量索引）。
+
+        Args:
+            path_prefix: 路径前缀过滤（可选）
+
+        Returns:
+            [(path, name, extension, size), ...] 列表
+        """
+        conn = self._get_conn()
+        try:
+            cursor = conn.cursor()
+            # 查询非目录、大小 <= 10MB 的文件
+            max_size = 10 * 1024 * 1024
+            if path_prefix:
+                norm_prefix = os.path.normpath(path_prefix)
+                escaped_prefix = norm_prefix.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+                like_pattern = escaped_prefix + '\\\\%'
+                cursor.execute('''
+                    SELECT path, name, extension, size
+                    FROM file_index_cache
+                    WHERE is_directory = 0
+                      AND size <= ?
+                      AND (path LIKE ? ESCAPE '\\' OR path = ?)
+                      AND path NOT IN (SELECT file_path FROM file_content_raw)
+                ''', (max_size, like_pattern, norm_prefix))
+            else:
+                cursor.execute('''
+                    SELECT path, name, extension, size
+                    FROM file_index_cache
+                    WHERE is_directory = 0
+                      AND size <= ?
+                      AND path NOT IN (SELECT file_path FROM file_content_raw)
+                ''', (max_size,))
+            return cursor.fetchall()
+        finally:
+            conn.close()

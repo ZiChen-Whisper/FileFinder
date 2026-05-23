@@ -1120,6 +1120,13 @@ class PreviewPanel(QWidget):
         self._preview_active = False
         self._movie = None
         self._excel_render_mode = False
+        self._search_keyword: str = ""
+        self._search_case_sensitive: bool = False
+        self._match_positions: list = []  # List of QTextCursor for text, or (page_idx, rect) for PDF
+        self._current_match_index: int = -1
+        self._pdf_match_rects: dict = {}  # {page_idx: [(x0,y0,x1,y1), ...]}
+        self._pdf_clean_pixmaps: dict = {}  # 原始无高亮的 pixmap 缓存，用于重新渲染高亮
+        self._is_pdf_text_mode: bool = False  # PDF 是否以纯文本模式预览（内容搜索时）
         self._init_ui()
 
     def _init_ui(self):
@@ -1159,6 +1166,61 @@ class PreviewPanel(QWidget):
         header_layout.addWidget(self.icon_label)
         header_layout.addWidget(self.title_label, 1)
         header_layout.addWidget(self._file_info_label)
+
+        # 搜索匹配导航控件
+        self._search_nav_widget = QWidget()
+        self._search_nav_widget.setVisible(False)
+        search_nav_layout = QHBoxLayout(self._search_nav_widget)
+        search_nav_layout.setContentsMargins(0, 0, 0, 0)
+        search_nav_layout.setSpacing(2)
+
+        self._search_match_label = QLabel("")
+        self._search_match_label.setStyleSheet(f"""
+            color: {COLORS.TEXT_BRAND};
+            font-size: {FONT.MICRO_PT}px;
+            border: none;
+            background: transparent;
+        """)
+
+        self._search_prev_btn = QPushButton("▲")
+        self._search_prev_btn.setFixedSize(20, 20)
+        self._search_prev_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._search_prev_btn.setStyleSheet(f"""
+            QPushButton {{
+                border: none;
+                background: transparent;
+                color: {COLORS.TEXT_SECONDARY};
+                font-size: 10px;
+                border-radius: 2px;
+            }}
+            QPushButton:hover {{
+                background: {COLORS.BG_TERTIARY};
+            }}
+        """)
+        self._search_prev_btn.clicked.connect(self._on_search_prev)
+
+        self._search_next_btn = QPushButton("▼")
+        self._search_next_btn.setFixedSize(20, 20)
+        self._search_next_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._search_next_btn.setStyleSheet(f"""
+            QPushButton {{
+                border: none;
+                background: transparent;
+                color: {COLORS.TEXT_SECONDARY};
+                font-size: 10px;
+                border-radius: 2px;
+            }}
+            QPushButton:hover {{
+                background: {COLORS.BG_TERTIARY};
+            }}
+        """)
+        self._search_next_btn.clicked.connect(self._on_search_next)
+
+        search_nav_layout.addWidget(self._search_match_label)
+        search_nav_layout.addWidget(self._search_prev_btn)
+        search_nav_layout.addWidget(self._search_next_btn)
+
+        header_layout.addWidget(self._search_nav_widget)
 
         self.header_widget.setStyleSheet(f"""
             #previewHeader {{
@@ -1821,6 +1883,12 @@ class PreviewPanel(QWidget):
         self._pdf_pages_loaded = 0
         self._preview_active = False
         self._excel_render_mode = False
+        self._match_positions = []
+        self._current_match_index = -1
+        self._pdf_match_rects = {}
+        self._pdf_clean_pixmaps = {}
+        self._is_pdf_text_mode = False
+        self._search_nav_widget.setVisible(False)
         if result is None:
             self._show_empty()
             return
@@ -1831,6 +1899,14 @@ class PreviewPanel(QWidget):
             self._show_file_preview(file_item)
         else:
             self._show_preview_prompt(file_item)
+
+    def set_search_keyword(self, keyword: str, case_sensitive: bool = False):
+        """设置当前搜索关键词，用于预览面板高亮显示"""
+        self._search_keyword = keyword
+        self._search_case_sensitive = case_sensitive
+        self._match_positions = []
+        self._current_match_index = -1
+        self._pdf_match_rects = {}
 
     def _show_preview_prompt(self, file_item):
         self._hide_all_content()
@@ -1879,12 +1955,19 @@ class PreviewPanel(QWidget):
         self._zoom_slider.setVisible(False)
         self._zoom_percent_label.setVisible(False)
         self._fit_view_btn.setVisible(False)
+        self._search_nav_widget.setVisible(False)
 
     def _get_dpi_for_widget(self) -> int:
         screen = self.screen()
         if screen:
             return int(screen.logicalDotsPerInch() * 1.5)
         return 150
+
+    # 内容搜索模式下，使用纯文本预览以支持搜索高亮的扩展名集合
+    _CONTENT_SEARCH_TEXT_EXTS = (
+        MARKDOWN_EXTS | HTML_EXTS | {'.pdf'} |
+        {'.docx', '.doc', '.xlsx', '.xls', '.pptx', '.ppt'}
+    )
 
     def _show_file_preview(self, file_item, force=False):
         self._hide_all_content()
@@ -1897,7 +1980,10 @@ class PreviewPanel(QWidget):
         icon_name = FILE_ICON_MAP.get(ext, 'doctype/File.svg')
         self.icon_label.setPixmap(QIcon(f"icons/{icon_name}").pixmap(QSize(20, 20)))
 
-        if ext in MARKDOWN_EXTS:
+        # 内容搜索模式下，文档类型使用纯文本预览以支持搜索高亮
+        if self._search_keyword and ext in self._CONTENT_SEARCH_TEXT_EXTS:
+            self._show_text_content_for_search(file_item, force)
+        elif ext in MARKDOWN_EXTS:
             self._show_markdown_content(file_item, force)
         elif ext in HTML_EXTS:
             self._show_html_content(file_item, force)
@@ -1987,6 +2073,102 @@ class PreviewPanel(QWidget):
             self._file_info_label.setText(f"{file_item.size_display} · {len(lines)} 行")
 
         self._content_stack.setCurrentWidget(self._text_preview)
+
+        # 应用搜索关键词高亮
+        self._apply_text_search_highlight()
+
+    def _show_text_content_for_search(self, file_item, force=False):
+        """内容搜索模式下，将文档文件以纯文本方式预览，以支持搜索高亮。
+
+        使用 ParserRegistry 提取文档文本内容（PDF/Word/Excel/PPT 等），
+        然后以纯文本形式展示并应用搜索关键词高亮。
+
+        Args:
+            file_item: 文件信息对象
+            force: 是否强制预览（忽略大小限制）
+        """
+        file_size = self._check_file_size(file_item, MAX_DOC_PREVIEW_SIZE_MB, force)
+        if file_size is None and not force:
+            return
+
+        ext = file_item.extension.lower()
+        is_pdf = ext == '.pdf'
+        self._is_pdf_text_mode = is_pdf
+
+        # 使用 ParserRegistry 提取文本内容
+        from core.file_parser import ParserRegistry
+        registry = ParserRegistry()
+        content = registry.parse(file_item.path)
+
+        if not content:
+            self._show_unsupported(file_item, "无法提取文件文本内容")
+            return
+
+        # 限制内容长度
+        if len(content) > MAX_DOC_CHARS:
+            content = content[:MAX_DOC_CHARS] + "\n... (内容已截断)"
+
+        # PDF 文件：在每页之间插入可视化分隔线（含页码）
+        if is_pdf:
+            content = self._add_pdf_page_separators(content)
+
+        self._full_content = content
+        lines = content.splitlines()
+        truncated = len(lines) > MAX_PREVIEW_LINES
+        display_lines = lines[:MAX_PREVIEW_LINES] if truncated else lines
+        self._showing_truncated = truncated
+
+        display_content = '\n'.join(display_lines)
+        self._text_edit.setPlainText(display_content)
+
+        # PDF 文件不使用语法高亮，其他文档类型使用
+        if not is_pdf:
+            self._highlighter = _create_highlighter(self._text_edit.document(), ext)
+        else:
+            self._highlighter = None
+
+        cursor = self._text_edit.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.Start)
+        self._text_edit.setTextCursor(cursor)
+
+        self._show_more_btn.setVisible(truncated)
+        self._md_mode_slider.setVisible(False)
+        self._html_mode_slider.setVisible(False)
+        self._md_browser.setVisible(False)
+        self._text_edit.setVisible(True)
+
+        if truncated:
+            self._file_info_label.setText(
+                f"{file_item.size_display} · 搜索模式 · 显示前 {MAX_PREVIEW_LINES} 行（共 {len(lines)} 行）"
+            )
+        else:
+            self._file_info_label.setText(f"{file_item.size_display} · 搜索模式 · {len(lines)} 行")
+
+        self._content_stack.setCurrentWidget(self._text_preview)
+
+        # 应用搜索关键词高亮
+        self._apply_text_search_highlight()
+
+    def _add_pdf_page_separators(self, content: str) -> str:
+        """为 PDF 提取的文本添加页码分隔线。
+
+        ParserRegistry 提取的 PDF 文本中，页面之间用双换行符分隔。
+        此方法将双换行替换为可视化分隔线，方便用户定位页码。
+
+        Args:
+            content: PDF 提取的原始文本
+
+        Returns:
+            添加了页码分隔线的文本
+        """
+        # PDFParser 使用 "\n\n" 分隔页面
+        pages = content.split("\n\n")
+        result_parts = []
+        for i, page_text in enumerate(pages):
+            page_num = i + 1
+            separator = f"\n{'─' * 40}  第 {page_num} 页  {'─' * 40}\n"
+            result_parts.append(separator + page_text)
+        return "\n".join(result_parts)
 
     def _show_markdown_content(self, file_item, force=False):
         file_size = self._check_file_size(file_item, MAX_TEXT_PREVIEW_SIZE_MB, force)
@@ -2264,6 +2446,7 @@ class PreviewPanel(QWidget):
 
         # 以 150 DPI 渲染（足够清晰，缩放时用 Qt 平滑缩放）
         self._start_pdf_render(file_item.path, 0, DEFAULT_PDF_PAGES, 150)
+        # 搜索高亮将在渲染完成后应用
 
     def _start_pdf_render(self, file_path, start_page, count, dpi=150):
         if self._pdf_render_worker and self._pdf_render_worker.isRunning():
@@ -2285,8 +2468,9 @@ class PreviewPanel(QWidget):
         if pixmap.isNull():
             return
 
-        # 存储原始高 DPI pixmap
+        # 存储原始高 DPI pixmap（无高亮注释的干净版本）
         self._pdf_original_pixmaps[page_idx] = pixmap
+        self._pdf_clean_pixmaps[page_idx] = QPixmap(pixmap)
 
         # 按当前缩放级别显示
         self._display_pdf_page(page_idx, pixmap)
@@ -2372,6 +2556,10 @@ class PreviewPanel(QWidget):
             )
         else:
             self._pdf_load_more_btn.setVisible(False)
+
+        # 如果有搜索关键词，应用 PDF 高亮
+        if self._search_keyword and self._current_file_item and self._current_file_item.extension.lower() == '.pdf':
+            self._apply_pdf_search_highlight()
 
     def _on_pdf_load_more(self):
         if not self._current_file_item:
@@ -2640,8 +2828,12 @@ class PreviewPanel(QWidget):
             cursor.movePosition(QTextCursor.MoveOperation.Start)
             self._text_edit.setTextCursor(cursor)
 
+            self._highlighter = None
             self._file_info_label.setText(f"{file_item.size_display} · Word 文档 · 纯文本预览")
             self._content_stack.setCurrentWidget(self._text_preview)
+
+            # 应用搜索关键词高亮
+            self._apply_text_search_highlight()
         except Exception as e:
             logger.warning(f"Word 预览失败: {file_item.path}, {type(e).__name__}")
             self._show_unsupported(file_item, "无法解析此 Word 文件\n可能是不受支持的格式")
@@ -3111,6 +3303,8 @@ class PreviewPanel(QWidget):
             self._file_info_label.setText(
                 f"{self._current_file_item.size_display} · 显示全部内容"
             )
+            # 重新应用搜索高亮
+            self._apply_text_search_highlight()
 
     def _on_toggle_md_mode(self, index: int = 1):
         self._md_source_mode = (index == 1)
@@ -3124,6 +3318,8 @@ class PreviewPanel(QWidget):
                 self._file_info_label.setText(
                     f"{self._current_file_item.size_display} · 源码模式"
                 )
+                # 源码模式下重新应用搜索高亮
+                self._apply_text_search_highlight()
             else:
                 self._file_info_label.setText(
                     f"{self._current_file_item.size_display} · 预览模式"
@@ -3227,6 +3423,8 @@ class PreviewPanel(QWidget):
                 self._file_info_label.setText(
                     f"{self._current_file_item.size_display} · 源码模式"
                 )
+                # 源码模式下重新应用搜索高亮
+                self._apply_text_search_highlight()
             else:
                 self._file_info_label.setText(
                     f"{self._current_file_item.size_display} · 渲染模式"
@@ -3565,6 +3763,250 @@ class PreviewPanel(QWidget):
         except Exception as e:
             logger.warning(f"视频缩略图提取失败: {type(e).__name__}")
         return None
+
+    def _apply_text_search_highlight(self):
+        """在文本/代码预览中高亮搜索关键词"""
+        if not self._search_keyword or not self._text_edit.document():
+            self._search_nav_widget.setVisible(False)
+            return
+
+        doc = self._text_edit.document()
+        self._match_positions = []
+
+        # 使用 QRegularExpression 进行搜索（QTextDocument.find 需要 QRegularExpression）
+        from PySide6.QtCore import QRegularExpression
+        pattern_str = QRegularExpression.escape(self._search_keyword)
+        pattern_options = QRegularExpression.PatternOption.CaseInsensitiveOption
+        if self._search_case_sensitive:
+            pattern_options = QRegularExpression.PatternOption.NoPatternOption
+        qregex = QRegularExpression(pattern_str, pattern_options)
+
+        cursor = QTextCursor(doc)
+        while not cursor.isNull():
+            cursor = doc.find(qregex, cursor)
+            if cursor.isNull():
+                break
+            if cursor.hasSelection():
+                self._match_positions.append(QTextCursor(cursor))
+
+        if not self._match_positions:
+            self._search_nav_widget.setVisible(False)
+            return
+
+        # 跳转到第一个匹配，并直接应用区分当前/其他的高亮
+        self._current_match_index = 0
+        self._update_current_match_highlight()
+        self._search_nav_widget.setVisible(True)
+        self._update_search_nav_label()
+
+    def _update_current_match_highlight(self):
+        """更新当前匹配项的高亮样式（文本模式）
+
+        当前匹配项使用醒目的黄色背景 + 粗下划线（表示正在查看），
+        其他匹配项使用淡蓝色背景（表示尚未浏览），
+        确保当前匹配在视觉上明显区分于其他匹配。
+        """
+        if not self._match_positions:
+            return
+
+        selections = []
+        # 未浏览匹配：淡蓝色背景
+        fmt_all = QTextCharFormat()
+        fmt_all.setBackground(QColor(COLORS.SEARCH_HIGHLIGHT_BG))
+
+        # 当前匹配：黄色背景 + 粗下划线，确保醒目
+        fmt_current = QTextCharFormat()
+        fmt_current.setBackground(QColor(COLORS.SEARCH_HIGHLIGHT_CURRENT_BG))
+        fmt_current.setFontUnderline(True)
+        fmt_current.setUnderlineColor(QColor(COLORS.SEARCH_HIGHLIGHT_CURRENT_BG))
+
+        for i, pos_cursor in enumerate(self._match_positions):
+            sel = QTextEdit.ExtraSelection()
+            sel.cursor = pos_cursor
+            sel.format = fmt_current if i == self._current_match_index else fmt_all
+            selections.append(sel)
+
+        self._text_edit.setExtraSelections(selections)
+
+        # 滚动到当前匹配位置（不选中文字，避免 selection-background-color 覆盖 ExtraSelection）
+        if 0 <= self._current_match_index < len(self._match_positions):
+            target = self._match_positions[self._current_match_index]
+            scroll_cursor = QTextCursor(self._text_edit.document())
+            scroll_cursor.setPosition(target.selectionStart())
+            self._text_edit.setTextCursor(scroll_cursor)
+            self._text_edit.ensureCursorVisible()
+
+    def _on_search_prev(self):
+        """跳转到上一个搜索匹配"""
+        if not self._match_positions:
+            return
+        self._current_match_index = (self._current_match_index - 1) % len(self._match_positions)
+        ext = self._current_file_item.extension.lower() if self._current_file_item else ""
+        if ext == '.pdf' and not self._is_pdf_text_mode:
+            self._navigate_pdf_match()
+        else:
+            self._update_current_match_highlight()
+        self._update_search_nav_label()
+
+    def _on_search_next(self):
+        """跳转到下一个搜索匹配"""
+        if not self._match_positions:
+            return
+        self._current_match_index = (self._current_match_index + 1) % len(self._match_positions)
+        ext = self._current_file_item.extension.lower() if self._current_file_item else ""
+        if ext == '.pdf' and not self._is_pdf_text_mode:
+            self._navigate_pdf_match()
+        else:
+            self._update_current_match_highlight()
+        self._update_search_nav_label()
+
+    def _update_search_nav_label(self):
+        """更新搜索导航标签文字"""
+        total = len(self._match_positions)
+        current = self._current_match_index + 1 if self._current_match_index >= 0 else 0
+        self._search_match_label.setText(f"{current}/{total}")
+
+    def _apply_pdf_search_highlight(self):
+        """在 PDF 预览中高亮搜索关键词，使用 fitz 原生高亮注释实现无损预览"""
+        if not self._search_keyword:
+            self._search_nav_widget.setVisible(False)
+            return
+
+        try:
+            import fitz
+        except ImportError:
+            self._search_nav_widget.setVisible(False)
+            return
+
+        try:
+            doc = fitz.open(self._current_file_item.path)
+        except Exception:
+            self._search_nav_widget.setVisible(False)
+            return
+
+        self._match_positions = []
+        self._pdf_match_rects = {}
+
+        try:
+            for page_idx in range(len(doc)):
+                page = doc[page_idx]
+                try:
+                    found = page.search_for(self._search_keyword)
+                    if found:
+                        rects = [(r.x0, r.y0, r.x1, r.y1) for r in found]
+                        self._pdf_match_rects[page_idx] = rects
+                        for rect in rects:
+                            self._match_positions.append((page_idx, rect))
+                except Exception:
+                    pass
+        finally:
+            doc.close()
+
+        if not self._match_positions:
+            self._search_nav_widget.setVisible(False)
+            return
+
+        self._current_match_index = 0
+        self._search_nav_widget.setVisible(True)
+        self._update_search_nav_label()
+
+        # 重新渲染带高亮的页面
+        self._redraw_pdf_highlights()
+
+        # 跳转到第一个匹配
+        self._navigate_pdf_match()
+
+    def _redraw_pdf_highlights(self):
+        """使用 fitz 原生高亮注释重新渲染 PDF 页面，实现类似 PDF 阅读器的查找效果"""
+        if not self._pdf_clean_pixmaps:
+            return
+
+        try:
+            import fitz
+        except ImportError:
+            return
+
+        try:
+            doc = fitz.open(self._current_file_item.path)
+        except Exception:
+            return
+
+        try:
+            dpi = self._get_dpi_for_widget()
+            for page_idx in list(self._pdf_clean_pixmaps.keys()):
+                if page_idx >= len(doc):
+                    continue
+
+                page = doc[page_idx]
+                match_rects = self._pdf_match_rects.get(page_idx, [])
+
+                if not match_rects:
+                    # 无匹配的页面，恢复原始无高亮版本
+                    clean = self._pdf_clean_pixmaps.get(page_idx)
+                    if clean:
+                        self._pdf_original_pixmaps[page_idx] = QPixmap(clean)
+                        self._display_pdf_page(page_idx, clean)
+                    continue
+
+                # 清除该页之前的所有注释
+                for annot in list(page.annots() or []):
+                    page.delete_annot(annot)
+
+                # 为每个匹配添加高亮注释
+                for rect_idx, rect_tuple in enumerate(match_rects):
+                    # 判断是否为当前匹配
+                    is_current = (self._current_match_index >= 0 and
+                                  self._match_positions and
+                                  self._current_match_index < len(self._match_positions) and
+                                  self._match_positions[self._current_match_index] == (page_idx, rect_tuple))
+
+                    rect = fitz.Rect(rect_tuple)
+                    if is_current:
+                        # 当前匹配：黄色高亮（正在查看）
+                        annot = page.add_highlight_annot([rect])
+                        annot.set_colors(stroke=fitz.utils.getColor("yellow"))
+                        annot.update()
+                    else:
+                        # 未浏览匹配：淡蓝色高亮
+                        annot = page.add_highlight_annot([rect])
+                        annot.set_colors(stroke=fitz.utils.getColor("lightblue"))
+                        annot.update()
+
+                # 重新渲染带注释的页面
+                mat = fitz.Matrix(dpi / 72, dpi / 72)
+                pix = page.get_pixmap(matrix=mat)
+                img_data = pix.tobytes("png")
+
+                # 更新 pixmap 缓存（不覆盖 clean 版本）
+                new_pixmap = QPixmap()
+                new_pixmap.loadFromData(img_data, "PNG")
+                self._pdf_original_pixmaps[page_idx] = new_pixmap
+
+                # 按当前缩放级别显示
+                self._display_pdf_page(page_idx, new_pixmap)
+        finally:
+            doc.close()
+
+    def _navigate_pdf_match(self):
+        """跳转到当前 PDF 匹配位置"""
+        if not self._match_positions or self._current_match_index < 0:
+            return
+        if self._current_match_index >= len(self._match_positions):
+            return
+
+        page_idx, _ = self._match_positions[self._current_match_index]
+
+        # 确保该页已加载
+        if page_idx >= self._pdf_pages_loaded:
+            self._start_pdf_render(self._current_file_item.path, 0, page_idx + 1, 150)
+
+        # 重绘高亮（更新当前匹配标记）
+        self._redraw_pdf_highlights()
+
+        # 滚动到对应页面
+        if page_idx < len(self._pdf_page_labels) and self._pdf_page_labels[page_idx] is not None:
+            container = self._pdf_page_labels[page_idx]
+            self._pdf_scroll_area.ensureWidgetVisible(container, 0, 50)
 
     def clear_preview(self):
         self._cancel_workers()

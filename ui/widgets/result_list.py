@@ -268,6 +268,8 @@ class ResultListWidget(QListWidget):
 
     def _setup_progress_overlay(self):
         self._progress_overlay = QFrame(self.viewport())
+        self._progress_overlay.setMinimumWidth(280)
+        self._progress_overlay.setMaximumWidth(360)
         self._progress_overlay.setStyleSheet(f"""
             QFrame {{
                 background-color: {COLORS.OVERLAY_LIGHT};
@@ -276,8 +278,8 @@ class ResultListWidget(QListWidget):
         """)
         overlay_layout = QVBoxLayout(self._progress_overlay)
         overlay_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        overlay_layout.setSpacing(12)
-        overlay_layout.setContentsMargins(40, 40, 40, 40)
+        overlay_layout.setSpacing(6)
+        overlay_layout.setContentsMargins(32, 24, 32, 24)
 
         self._progress_label = QLabel("正在搜索...")
         self._progress_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -297,6 +299,43 @@ class ResultListWidget(QListWidget):
         self._progress_bar.setTextVisible(False)
         self._progress_bar.setStyleSheet(CENTER_PROGRESS_STYLE)
         overlay_layout.addWidget(self._progress_bar)
+
+        # 文件进度标签：显示 "已搜索 123/456 个文件"
+        self._progress_file_label = QLabel("")
+        self._progress_file_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._progress_file_label.setStyleSheet(f"""
+            font-size: {FONT.CAPTION_PT}px;
+            color: {COLORS.TEXT_TERTIARY};
+            background: transparent;
+            border: none;
+        """)
+        self._progress_file_label.setVisible(False)
+        overlay_layout.addWidget(self._progress_file_label)
+
+        # 当前搜索文件标签：显示正在搜索的文件名
+        self._progress_current_file_label = QLabel("")
+        self._progress_current_file_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._progress_current_file_label.setStyleSheet(f"""
+            font-size: {FONT.MICRO_PT}px;
+            color: {COLORS.TEXT_TERTIARY};
+            background: transparent;
+            border: none;
+        """)
+        self._progress_current_file_label.setWordWrap(True)
+        self._progress_current_file_label.setVisible(False)
+        overlay_layout.addWidget(self._progress_current_file_label)
+
+        # 耐心等待提示标签
+        self._progress_patience_label = QLabel("")
+        self._progress_patience_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._progress_patience_label.setStyleSheet(f"""
+            font-size: {FONT.MICRO_PT}px;
+            color: {COLORS.TEXT_BRAND};
+            background: transparent;
+            border: none;
+        """)
+        self._progress_patience_label.setVisible(False)
+        overlay_layout.addWidget(self._progress_patience_label)
 
         self._progress_overlay.setVisible(False)
 
@@ -508,8 +547,13 @@ class ResultListWidget(QListWidget):
     def _position_progress_overlay(self):
         if not self._progress_overlay:
             return
-        overlay_w = min(self.width() - 40, 320)
-        overlay_h = 120
+        overlay_w = min(self.width() - 40, 360)
+        # 让 overlay 根据内容自动计算高度
+        self._progress_overlay.adjustSize()
+        overlay_h = self._progress_overlay.sizeHint().height()
+        # 限制最大高度不超过视口高度的 80%
+        max_h = int(self.height() * 0.8)
+        overlay_h = min(overlay_h, max_h)
         x = (self.width() - overlay_w) // 2
         y = (self.height() - overlay_h) // 2
         self._progress_overlay.setGeometry(x, y, overlay_w, overlay_h)
@@ -523,9 +567,68 @@ class ResultListWidget(QListWidget):
             self._progress_overlay.raise_()
             self._position_progress_overlay()
 
+    def update_search_progress(self, processed: int, total: int):
+        """更新搜索进度详情
+
+        Args:
+            processed: 已处理的文件数
+            total: 总文件数
+        """
+        if not self._progress_overlay or not self._progress_overlay.isVisible():
+            return
+
+        # 更新进度条为确定模式
+        if total > 0:
+            self._progress_bar.setMaximum(total)
+            self._progress_bar.setValue(processed)
+
+        # 更新文件进度标签
+        if self._progress_file_label:
+            self._progress_file_label.setText(f"已搜索 {processed}/{total} 个文件")
+            self._progress_file_label.setVisible(True)
+
+        # 文件数量较多时显示耐心等待提示
+        if self._progress_patience_label:
+            if total > 500:
+                self._progress_patience_label.setText("文件较多，请耐心等待...")
+                self._progress_patience_label.setVisible(True)
+            elif total > 100:
+                self._progress_patience_label.setText("搜索中，请稍候...")
+                self._progress_patience_label.setVisible(True)
+            else:
+                self._progress_patience_label.setVisible(False)
+
+        self._position_progress_overlay()
+
+    def update_searching_file(self, file_path: str):
+        """更新当前正在搜索的文件路径显示
+
+        Args:
+            file_path: 当前正在搜索的文件路径
+        """
+        if not self._progress_overlay or not self._progress_overlay.isVisible():
+            return
+
+        if self._progress_current_file_label:
+            # 只显示文件名，避免路径过长
+            filename = os.path.basename(file_path)
+            self._progress_current_file_label.setText(f"正在搜索: {filename}")
+            self._progress_current_file_label.setVisible(True)
+
     def hide_search_progress(self):
         if self._progress_overlay:
             self._progress_overlay.setVisible(False)
+        # 重置进度条为不确定模式
+        if self._progress_bar:
+            self._progress_bar.setMaximum(0)
+            self._progress_bar.setValue(0)
+        # 隐藏详情标签
+        if hasattr(self, '_progress_file_label'):
+            self._progress_file_label.setVisible(False)
+        if hasattr(self, '_progress_current_file_label'):
+            self._progress_current_file_label.setVisible(False)
+        if hasattr(self, '_progress_patience_label'):
+            self._progress_patience_label.setVisible(False)
 
     def add_result(self, result: SearchResult):
         idx = len(self._results)

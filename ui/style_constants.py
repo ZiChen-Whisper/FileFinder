@@ -104,6 +104,16 @@ class ColorTokens:
     # 信息色：用于问题图标
     INFO: str = "#3B82F6"
 
+    # --- 搜索高亮色 ---
+    # 搜索未浏览匹配项背景：淡蓝色，表示尚未查看的匹配
+    SEARCH_HIGHLIGHT_BG: str = "#D6EAFF"
+    # 搜索当前匹配项背景：黄色，表示当前正在查看的匹配
+    SEARCH_HIGHLIGHT_CURRENT_BG: str = "#FFD700"
+    # PDF 搜索高亮覆盖色（半透明）- 未浏览匹配
+    SEARCH_PDF_HIGHLIGHT: str = "rgba(214, 234, 255, 180)"
+    # PDF 搜索当前匹配高亮覆盖色（半透明）- 当前匹配
+    SEARCH_PDF_HIGHLIGHT_CURRENT: str = "rgba(255, 215, 0, 220)"
+
     # --- 阴影与遮罩 ---
     # 常规阴影色：用于弹窗轻微阴影
     SHADOW_COLOR: str = "rgba(0, 0, 0, 0.08)"

@@ -15,6 +15,8 @@ class ScanWorker(QThread):
     dir_completed = Signal(str)
     dir_scanned = Signal(str)
     file_found = Signal(str)
+    # 内容索引阶段信号：(已索引文件数, 总文件数, 当前文件路径)
+    content_index_progress = Signal(int, int, str)
 
     SKIP_DIR_NAMES = frozenset({
         'node_modules', '__pycache__', '.git', '.svn', '.hg',
@@ -70,6 +72,85 @@ class ScanWorker(QThread):
                 total += len(dirs) + 1
         return total
 
+    def _index_file_contents(self, db, normalized_dirs):
+        """阶段2：为已扫描的文件建立内容全文索引。
+
+        遍历 file_index_cache 中本次扫描路径下的文件，
+        使用 ParserRegistry 提取文本内容，jieba 分词后写入 FTS5。
+
+        Args:
+            db: DatabaseManager 实例
+            normalized_dirs: 已规范化的扫描目录列表
+        """
+        import time
+        from core.file_parser import ParserRegistry
+        from utils.tokenizer import tokenize_for_fts5
+
+        parser_registry = ParserRegistry()
+        supported_exts = parser_registry.get_all_supported_extensions()
+
+        # 获取需要索引的文件列表（排除已有索引的文件）
+        files_to_index = []
+        for d in normalized_dirs:
+            if self._cancelled:
+                return
+            rows = db.get_files_for_content_indexing(d)
+            for row in rows:
+                ext = row["extension"] or ""
+                if ext.lower() in supported_exts:
+                    files_to_index.append((row["path"], row["name"]))
+
+        total = len(files_to_index)
+        if total == 0:
+            return
+
+        self.content_index_progress.emit(0, total, "正在准备内容索引...")
+
+        indexed = 0
+        batch = []
+        batch_size = 50  # 内容索引批量大小（每条内容较大，不宜过大）
+        last_progress_time = time.time()
+
+        for file_path, file_name in files_to_index:
+            if self._cancelled:
+                break
+
+            try:
+                # 使用 ParserRegistry 提取文本内容
+                content_text = parser_registry.parse(file_path)
+                if not content_text or not content_text.strip():
+                    indexed += 1
+                    continue
+
+                # jieba 分词
+                content_tokenized = tokenize_for_fts5(content_text)
+                if not content_tokenized:
+                    indexed += 1
+                    continue
+
+                batch.append((file_path, file_name, content_text, content_tokenized))
+
+                if len(batch) >= batch_size:
+                    db.insert_content_batch(batch)
+                    batch.clear()
+
+                indexed += 1
+                now = time.time()
+                if now - last_progress_time >= self._progress_interval:
+                    last_progress_time = now
+                    self.content_index_progress.emit(indexed, total, file_path)
+
+            except Exception as e:
+                logger.debug(f"内容索引失败: {file_path}, {type(e).__name__}")
+                indexed += 1
+                continue
+
+        # 写入剩余批次
+        if batch:
+            db.insert_content_batch(batch)
+
+        self.content_index_progress.emit(indexed, total, "内容索引完成")
+
     def run(self):
         import time
         start_time = time.time()
@@ -108,6 +189,7 @@ class ScanWorker(QThread):
             file_count = 0
             current_dir_display = ""
 
+            # ===== 阶段1：扫描文件元数据 =====
             for base_dir in normalized_dirs:
                 if self._cancelled:
                     break
@@ -155,6 +237,9 @@ class ScanWorker(QThread):
                     for filename in files:
                         if self._cancelled:
                             break
+                        # 跳过 Office 临时文件（以 ~$ 开头）
+                        if filename.startswith('~$'):
+                            continue
                         try:
                             file_path = os.path.join(root, filename)
                             stat = os.stat(file_path)
@@ -227,6 +312,19 @@ class ScanWorker(QThread):
                 self._file_log_batch.clear()
 
             total_files = dir_count + file_count
+
+            # ===== 阶段2：建立内容全文索引 =====
+            if not self._cancelled:
+                self.progress.emit(total_files, 99, "正在建立内容索引...")
+                self._index_file_contents(db, normalized_dirs)
+
+            if self._cancelled:
+                for d in normalized_dirs:
+                    set_scan_status(d, SCAN_STATUS_INCOMPLETE)
+                for d in normalized_dirs:
+                    db.delete_entries_by_prefix(d)
+                return
+
             for d in normalized_dirs:
                 set_scan_status(d, SCAN_STATUS_COMPLETE)
 

@@ -699,6 +699,27 @@ class FilterBar(QWidget):
     def is_sort_ascending(self):
         return self._sort_ascending
 
+    def set_search_mode(self, mode: str):
+        """根据搜索模式调整可见的文件类型分类。
+
+        内容搜索模式下只显示文档和代码分类（因为只有这些格式支持内容搜索），
+        文件名搜索模式下显示全部分类。
+
+        Args:
+            mode: 'name' 或 'content'
+        """
+        # 内容搜索模式下隐藏不适用的分类
+        content_hidden_categories = {'folder', 'image', 'video', 'audio', 'archive', 'other'}
+        for key, btn in self.type_buttons.items():
+            if mode == 'content':
+                btn.setVisible(key not in content_hidden_categories)
+            else:
+                btn.setVisible(True)
+
+        # 如果当前选中的分类被隐藏了，自动切换到"全部"
+        if mode == 'content' and self._selected_category in content_hidden_categories:
+            self._on_type_clicked('all')
+
     def get_selected_category(self):
         return self._selected_category
 

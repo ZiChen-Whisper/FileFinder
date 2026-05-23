@@ -6,8 +6,6 @@ from PySide6.QtCore import (Signal, Qt, QPropertyAnimation, QEasingCurve, QSize,
 from PySide6.QtGui import (QFont, QFontMetrics, QIcon, QPainter, QPen, QColor,
                           QPalette, QBrush, QPixmap)
 
-from constants import SEARCH_DEBOUNCE_MS
-from utils.thread_helper import Debouncer
 from utils.flow_layout import FlowLayout
 from ..style_constants import COLORS, FONT, RADIUS, BTN, DIALOG, TRANSITION
 from ..modern_dialog import ModernDialogBase
@@ -559,6 +557,7 @@ class MatchModeHelpDialog(ModernDialogBase):
 
 class SearchBar(QWidget):
     search_triggered = Signal(str, str)
+    search_mode_changed = Signal(str)  # 搜索模式变更信号：'name' 或 'content'
 
     MATCH_MODES = ['fuzzy', 'exact', 'wildcard', 'regex']
     MATCH_MODE_LABELS = {'fuzzy': '模糊', 'exact': '精确', 'wildcard': '通配符', 'regex': '正则'}
@@ -567,7 +566,6 @@ class SearchBar(QWidget):
         super().__init__(parent)
         self._search_mode = 'name'
         self._name_match_mode = 'fuzzy'
-        self._debouncer = Debouncer(delay_ms=SEARCH_DEBOUNCE_MS, parent=self)
         self._init_ui()
 
     def _init_ui(self):
@@ -674,6 +672,7 @@ class SearchBar(QWidget):
             self.search_input.setPlaceholderText("输入文件内容关键词搜索...")
             self._match_mode_slider.setVisible(False)
             self.help_icon.setVisible(False)
+        self.search_mode_changed.emit(mode)
 
     def _set_match_mode(self, mode: str):
         self._name_match_mode = mode
@@ -687,10 +686,7 @@ class SearchBar(QWidget):
         dialog.exec()
 
     def _on_text_changed(self, text: str):
-        if text.strip():
-            self._debouncer.trigger(self._emit_search)
-        else:
-            self._debouncer._timer.stop()
+        pass
 
     def _emit_search(self):
         text = self.search_input.text()
@@ -717,6 +713,10 @@ class SearchBar(QWidget):
         if self._search_mode == 'content':
             return self.search_input.text()
         return ""
+
+    def get_search_mode(self) -> str:
+        """返回当前搜索模式：'name' 或 'content'"""
+        return self._search_mode
 
     def set_focus(self):
         self.search_input.setFocus()
