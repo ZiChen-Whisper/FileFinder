@@ -1124,6 +1124,7 @@ class PreviewPanel(QWidget):
         self._search_case_sensitive: bool = False
         self._match_positions: list = []  # List of QTextCursor for text, or (page_idx, rect) for PDF
         self._current_match_index: int = -1
+        self._active_highlight_edit = None  # 当前用于搜索高亮的 QTextEdit 控件，在 _init_ui 后设置
         self._pdf_match_rects: dict = {}  # {page_idx: [(x0,y0,x1,y1), ...]}
         self._pdf_clean_pixmaps: dict = {}  # 原始无高亮的 pixmap 缓存，用于重新渲染高亮
         self._is_pdf_text_mode: bool = False  # PDF 是否以纯文本模式预览（内容搜索时）
@@ -1847,6 +1848,7 @@ class PreviewPanel(QWidget):
         layout.addWidget(self._content_stack, 1)
 
         self.setLayout(layout)
+        self._active_highlight_edit = self._text_edit  # 默认使用主文本编辑控件
         self.setStyleSheet(f"""
             PreviewPanel {{
                 background-color: {COLORS.BG_PRIMARY};
@@ -1975,6 +1977,7 @@ class PreviewPanel(QWidget):
         self._preview_active = True
         self.title_label.setText(file_item.name)
         self._file_info_label.setText(file_item.size_display)
+        self._active_highlight_edit = self._text_edit  # 默认使用主文本编辑控件
 
         ext = file_item.extension.lower()
         icon_name = FILE_ICON_MAP.get(ext, 'doctype/File.svg')
@@ -2634,6 +2637,7 @@ class PreviewPanel(QWidget):
         self._excel_mode_slider.set_current_index(0)
         self._excel_tab.setVisible(False)
         self._excel_text_edit.setVisible(True)
+        self._active_highlight_edit = self._excel_text_edit
 
         try:
             from openpyxl import load_workbook
@@ -2665,6 +2669,9 @@ class PreviewPanel(QWidget):
         self._file_info_label.setText(f"{file_item.size_display} · Excel 文档")
         self._content_stack.setCurrentWidget(self._excel_preview)
 
+        # 应用搜索关键词高亮
+        self._apply_text_search_highlight()
+
     def _on_toggle_excel_mode(self, index: int = 1):
         if not self._current_file_item:
             return
@@ -2694,6 +2701,9 @@ class PreviewPanel(QWidget):
             self._excel_text_edit.setVisible(True)
             self._excel_tab.setVisible(False)
             self._content_stack.setCurrentWidget(self._excel_preview)
+            # 切回文本模式时重新应用搜索高亮
+            self._active_highlight_edit = self._excel_text_edit
+            self._apply_text_search_highlight()
 
     def _create_excel_table(self, headers, rows, sheet_name) -> QTableWidget:
         """创建带样式的 QTableWidget 用于 Excel 预览"""
@@ -2844,6 +2854,7 @@ class PreviewPanel(QWidget):
             return
 
         self._ppt_text_edit.clear()
+        self._active_highlight_edit = self._ppt_text_edit
 
         try:
             from pptx import Presentation
@@ -2877,6 +2888,9 @@ class PreviewPanel(QWidget):
             self._ppt_text_edit.setPlainText("无法读取文本内容")
 
         self._content_stack.setCurrentWidget(self._ppt_preview)
+
+        # 应用搜索关键词高亮
+        self._apply_text_search_highlight()
 
     def _show_video_content(self, file_item, force=False):
         """显示视频文件属性信息预览（类似右键属性对话框）"""
@@ -3295,6 +3309,7 @@ class PreviewPanel(QWidget):
 
     def _on_show_more(self):
         if self._full_content:
+            self._active_highlight_edit = self._text_edit
             self._text_edit.setPlainText(self._full_content)
             self._showing_truncated = False
             self._show_more_btn.setVisible(False)
@@ -3308,6 +3323,7 @@ class PreviewPanel(QWidget):
 
     def _on_toggle_md_mode(self, index: int = 1):
         self._md_source_mode = (index == 1)
+        self._active_highlight_edit = self._text_edit
 
         if self._full_content:
             lines = self._full_content.splitlines()
@@ -3413,6 +3429,7 @@ class PreviewPanel(QWidget):
     def _on_toggle_html_mode(self, index: int = 0):
         """切换 HTML 预览的渲染/源码模式"""
         self._html_source_mode = (index == 1)
+        self._active_highlight_edit = self._text_edit
 
         if self._full_content:
             lines = self._full_content.splitlines()
@@ -3766,11 +3783,12 @@ class PreviewPanel(QWidget):
 
     def _apply_text_search_highlight(self):
         """在文本/代码预览中高亮搜索关键词"""
-        if not self._search_keyword or not self._text_edit.document():
+        text_edit = self._active_highlight_edit or self._text_edit
+        if not self._search_keyword or not text_edit.document():
             self._search_nav_widget.setVisible(False)
             return
 
-        doc = self._text_edit.document()
+        doc = text_edit.document()
         self._match_positions = []
 
         # 使用 QRegularExpression 进行搜索（QTextDocument.find 需要 QRegularExpression）
@@ -3809,6 +3827,7 @@ class PreviewPanel(QWidget):
         if not self._match_positions:
             return
 
+        text_edit = self._active_highlight_edit or self._text_edit
         selections = []
         # 未浏览匹配：淡蓝色背景
         fmt_all = QTextCharFormat()
@@ -3826,15 +3845,15 @@ class PreviewPanel(QWidget):
             sel.format = fmt_current if i == self._current_match_index else fmt_all
             selections.append(sel)
 
-        self._text_edit.setExtraSelections(selections)
+        text_edit.setExtraSelections(selections)
 
         # 滚动到当前匹配位置（不选中文字，避免 selection-background-color 覆盖 ExtraSelection）
         if 0 <= self._current_match_index < len(self._match_positions):
             target = self._match_positions[self._current_match_index]
-            scroll_cursor = QTextCursor(self._text_edit.document())
+            scroll_cursor = QTextCursor(text_edit.document())
             scroll_cursor.setPosition(target.selectionStart())
-            self._text_edit.setTextCursor(scroll_cursor)
-            self._text_edit.ensureCursorVisible()
+            text_edit.setTextCursor(scroll_cursor)
+            text_edit.ensureCursorVisible()
 
     def _on_search_prev(self):
         """跳转到上一个搜索匹配"""

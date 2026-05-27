@@ -1,6 +1,7 @@
 """中文分词工具模块，基于 jieba 实现 FTS5 全文索引所需的分词功能。"""
 
 import logging
+import warnings
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -14,10 +15,13 @@ def _ensure_jieba_initialized():
     global _jieba_initialized
     if not _jieba_initialized:
         try:
-            import jieba
-            # 静默加载，不打印初始化信息
-            jieba.setLogLevel(logging.WARNING)
-            jieba.initialize()
+            # 抑制 jieba 内部 pkg_resources 弃用警告
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", message=".*pkg_resources.*", category=UserWarning)
+                import jieba
+                # 静默加载，不打印初始化信息
+                jieba.setLogLevel(logging.WARNING)
+                jieba.initialize()
             _jieba_initialized = True
         except ImportError:
             logger.warning("jieba 未安装，中文分词功能不可用。请运行: pip install jieba")
