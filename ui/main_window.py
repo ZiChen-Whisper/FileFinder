@@ -355,6 +355,7 @@ class MainWindow(QMainWindow):
         self._search_scope_panel.scan_unscanned_requested.connect(self._on_scan_unscanned)
         self.search_bar.search_triggered.connect(self._on_search)
         self.search_bar.search_mode_changed.connect(self.filter_bar.set_search_mode)
+        self.search_bar.history_search_requested.connect(self._on_history_search)
         self.result_list.result_selected.connect(self._on_result_selected)
         self.result_list.status_info_requested.connect(self._update_status_info)
         self.filter_bar.filter_changed.connect(self._on_filter_changed)
@@ -692,6 +693,21 @@ class MainWindow(QMainWindow):
         self._search_worker.result_found.connect(self._on_search_result_found)
         self._search_worker.file_searching.connect(self._on_file_searching)
         self._search_worker.start()
+
+        # 保存搜索历史
+        try:
+            from database.history_dao import add_history
+            add_history(
+                name_query=name_query if name_query else None,
+                content_query=content_query if content_query else None,
+                name_mode=self.search_bar.get_name_mode()
+            )
+        except Exception:
+            pass
+
+    def _on_history_search(self, name_query: str, content_query: str, name_mode: str):
+        """从历史记录触发的搜索"""
+        self._on_search(name_query, content_query)
 
     def _on_search_progress(self, processed: int, total: int):
         """处理搜索进度更新信号"""

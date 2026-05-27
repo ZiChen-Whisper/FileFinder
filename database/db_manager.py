@@ -168,11 +168,16 @@ class DatabaseManager:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     name_query TEXT,
                     content_query TEXT,
+                    name_mode TEXT DEFAULT 'fuzzy',
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     result_count INTEGER DEFAULT 0
                 )
             ''')
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_history_created ON search_history(created_at DESC)")
+            try:
+                cursor.execute("ALTER TABLE search_history ADD COLUMN name_mode TEXT DEFAULT 'fuzzy'")
+            except sqlite3.OperationalError:
+                pass
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS settings (
                     key TEXT PRIMARY KEY,

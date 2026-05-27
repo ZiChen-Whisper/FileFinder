@@ -7,13 +7,15 @@ from .db_manager import DatabaseManager
 logger = logging.getLogger(__name__)
 
 
-def add_history(name_query: Optional[str], content_query: Optional[str], result_count: int = 0):
+def add_history(name_query: Optional[str], content_query: Optional[str],
+                name_mode: str = 'fuzzy', result_count: int = 0):
     """
     添加一条搜索历史记录。
 
     Args:
         name_query: 文件名搜索关键词
         content_query: 内容搜索关键词
+        name_mode: 文件名匹配模式（fuzzy/exact/wildcard/regex）
         result_count: 搜索结果数量
     """
     db = DatabaseManager()
@@ -21,9 +23,9 @@ def add_history(name_query: Optional[str], content_query: Optional[str], result_
     try:
         cursor = conn.cursor()
         cursor.execute('''
-            INSERT INTO search_history (name_query, content_query, result_count)
-            VALUES (?, ?, ?)
-        ''', (name_query, content_query, result_count))
+            INSERT INTO search_history (name_query, content_query, name_mode, result_count)
+            VALUES (?, ?, ?, ?)
+        ''', (name_query, content_query, name_mode, result_count))
         conn.commit()
     except Exception as e:
         logger.error(f"添加搜索历史失败: {e}")
@@ -46,7 +48,7 @@ def get_histories(limit: int = 100) -> List[SearchHistory]:
     try:
         cursor = conn.cursor()
         cursor.execute('''
-            SELECT id, name_query, content_query, created_at, result_count
+            SELECT id, name_query, content_query, name_mode, created_at, result_count
             FROM search_history
             ORDER BY created_at DESC
             LIMIT ?
@@ -68,7 +70,8 @@ def get_histories(limit: int = 100) -> List[SearchHistory]:
                     name_query=row['name_query'],
                     content_query=row['content_query'],
                     created_at=created_at,
-                    result_count=row['result_count']
+                    result_count=row['result_count'],
+                    name_mode=row['name_mode'] if row['name_mode'] else 'fuzzy'
                 ))
             except Exception as e:
                 logger.warning(f"解析搜索历史记录失败: {e}")
@@ -96,6 +99,28 @@ def delete_history(history_id: int):
         conn.commit()
     except Exception as e:
         logger.error(f"删除搜索历史失败: {e}")
+    finally:
+        conn.close()
+
+
+def delete_histories(history_ids: List[int]):
+    """
+    批量删除指定ID的搜索历史记录。
+
+    Args:
+        history_ids: 要删除的历史记录ID列表
+    """
+    if not history_ids:
+        return
+    db = DatabaseManager()
+    conn = db._get_conn()
+    try:
+        cursor = conn.cursor()
+        placeholders = ','.join('?' for _ in history_ids)
+        cursor.execute(f'DELETE FROM search_history WHERE id IN ({placeholders})', history_ids)
+        conn.commit()
+    except Exception as e:
+        logger.error(f"批量删除搜索历史失败: {e}")
     finally:
         conn.close()
 

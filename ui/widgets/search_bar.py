@@ -17,6 +17,60 @@ from ..style_manager import (
 
 
 from .animated_radio_button import AnimatedRadioButton
+from .search_history_panel import SearchHistoryPanel
+
+
+class HistoryIconButton(QPushButton):
+    """搜索框内嵌的历史记录图标按钮，使用 QPainter 绘制时钟图标"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._hovered = False
+        self.setFixedSize(28, 28)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolTip("搜索历史")
+        self.setStyleSheet(f"""
+            QPushButton {{
+                border: none;
+                border-radius: {RADIUS.MEDIUM}px;
+                background: transparent;
+                outline: none;
+            }}
+            QPushButton:hover {{
+                background-color: {COLORS.BG_HOVER};
+            }}
+        """)
+
+    def enterEvent(self, event):
+        self._hovered = True
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self._hovered = False
+        self.update()
+        super().leaveEvent(event)
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        color = QColor(COLORS.BRAND if self._hovered else COLORS.TEXT_TERTIARY)
+        pen = QPen(color, 1.5)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(pen)
+
+        cx, cy = 14, 14
+        r = 8
+        # 画时钟外圈
+        painter.drawEllipse(QPoint(cx, cy), r, r)
+        # 画时针
+        painter.drawLine(cx, cy, cx, cy - 5)
+        # 画分针
+        painter.drawLine(cx, cy, cx + 4, cy + 1)
+
+        painter.end()
 
 
 class MatchModeSlider(QWidget):
@@ -558,6 +612,7 @@ class MatchModeHelpDialog(ModernDialogBase):
 class SearchBar(QWidget):
     search_triggered = Signal(str, str)
     search_mode_changed = Signal(str)  # 搜索模式变更信号：'name' 或 'content'
+    history_search_requested = Signal(str, str, str)  # 历史记录搜索：name_query, content_query, name_mode
 
     MATCH_MODES = ['fuzzy', 'exact', 'wildcard', 'regex']
     MATCH_MODE_LABELS = {'fuzzy': '模糊', 'exact': '精确', 'wildcard': '通配符', 'regex': '正则'}
@@ -566,6 +621,7 @@ class SearchBar(QWidget):
         super().__init__(parent)
         self._search_mode = 'name'
         self._name_match_mode = 'fuzzy'
+        self._history_panel = None
         self._init_ui()
 
     def _init_ui(self):
@@ -581,12 +637,23 @@ class SearchBar(QWidget):
         input_row = QHBoxLayout()
         input_row.setSpacing(10)
 
-        self.search_input = QLineEdit()
+        # 搜索输入框容器（用于叠加历史按钮到输入框内部右侧）
+        self._input_container = QWidget()
+        self._input_container.setObjectName("inputContainer")
+        self._input_container.setStyleSheet("QWidget#inputContainer { background: transparent; }")
+        self._input_container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._input_container.setFixedHeight(42)
+
+        self.search_input = QLineEdit(self._input_container)
         self.search_input.setPlaceholderText("输入文件名关键词搜索...")
         self.search_input.setClearButtonEnabled(True)
         self.search_input.setStyleSheet(search_input_style())
         self.search_input.returnPressed.connect(self._emit_search)
         self.search_input.textChanged.connect(self._on_text_changed)
+
+        # 历史记录按钮（叠加在输入框内部右侧）
+        self._history_btn = HistoryIconButton(self._input_container)
+        self._history_btn.clicked.connect(self._show_history_panel)
 
         self.search_btn = AnimatedButton("搜索")
         self.search_btn.setFixedSize(80, 42)
@@ -598,7 +665,7 @@ class SearchBar(QWidget):
         self.search_btn.setStyleSheet(search_button_style())
         self.search_btn.clicked.connect(self._emit_search)
 
-        input_row.addWidget(self.search_input, 1)
+        input_row.addWidget(self._input_container, 1)
         input_row.addWidget(self.search_btn)
 
         search_layout.addLayout(input_row)
@@ -661,6 +728,74 @@ class SearchBar(QWidget):
                 background-color: {COLORS.BG_PRIMARY};
             }}
         """)
+
+    def resizeEvent(self, event):
+        """调整历史按钮位置，使其叠加在输入框右侧"""
+        super().resizeEvent(event)
+        self._reposition_history_btn()
+
+    def showEvent(self, event):
+        """首次显示时定位历史按钮"""
+        super().showEvent(event)
+        QTimer.singleShot(0, self._reposition_history_btn)
+
+    def _reposition_history_btn(self):
+        """将历史按钮定位到输入框内部右侧"""
+        if hasattr(self, '_history_btn') and hasattr(self, 'search_input') and hasattr(self, '_input_container'):
+            # 输入框填满容器
+            container_rect = self._input_container.rect()
+            if container_rect.width() <= 0:
+                return
+            self.search_input.setGeometry(container_rect)
+            # 历史按钮放在输入框右侧内部，留出 clear button 的空间
+            btn_x = container_rect.right() - 56
+            btn_y = (container_rect.height() - 28) // 2
+            self._history_btn.move(btn_x, btn_y)
+            self._history_btn.raise_()
+            # 给输入框右侧留出空间
+            self.search_input.setTextMargins(0, 0, 56, 0)
+
+    def _show_history_panel(self):
+        """显示历史记录面板"""
+        if self._history_panel is None:
+            self._history_panel = SearchHistoryPanel()
+            self._history_panel.search_requested.connect(self._on_history_search)
+
+        # 计算面板位置（在搜索输入框下方）
+        input_global_pos = self.search_input.mapToGlobal(QPoint(0, 0))
+        panel_x = input_global_pos.x()
+        panel_y = input_global_pos.y() + self.search_input.height() + 4
+
+        # 确保面板不超出屏幕
+        from PySide6.QtWidgets import QApplication
+        screen = QApplication.primaryScreen()
+        if screen:
+            screen_geo = screen.availableGeometry()
+            if panel_x + 460 > screen_geo.right():
+                panel_x = screen_geo.right() - 460
+            if panel_y + 420 > screen_geo.bottom():
+                panel_y = screen_geo.bottom() - 420
+
+        self._history_panel.show_panel(QPoint(panel_x, panel_y))
+
+    def _on_history_search(self, name_query: str, content_query: str, name_mode: str):
+        """从历史记录面板触发的搜索"""
+        # 设置搜索模式和内容
+        if name_query:
+            self._search_mode = 'name'
+            self.search_input.setText(name_query)
+            self.segmented_control.set_current_index(0)
+            self._set_match_mode(name_mode)
+            self._match_mode_slider.setVisible(True)
+            self.help_icon.setVisible(True)
+        elif content_query:
+            self._search_mode = 'content'
+            self.search_input.setText(content_query)
+            self.segmented_control.set_current_index(1)
+            self._match_mode_slider.setVisible(False)
+            self.help_icon.setVisible(False)
+
+        self.history_search_requested.emit(name_query, content_query, name_mode)
 
     def _set_mode(self, mode: str):
         self._search_mode = mode
