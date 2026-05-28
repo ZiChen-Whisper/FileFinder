@@ -350,7 +350,7 @@ class ResultListWidget(QListWidget):
         layout.setSpacing(12)
 
         empty_icon = QLabel()
-        empty_icon.setPixmap(QIcon("icons/search-alt.svg").pixmap(QSize(64, 64)))
+        empty_icon.setPixmap(QIcon("icons/FileFinder.png").pixmap(QSize(64, 64)))
         empty_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         empty_icon.setStyleSheet("background: transparent; border: none;")
 
@@ -390,11 +390,10 @@ class ResultListWidget(QListWidget):
             }
         """)
         layout = QVBoxLayout(self._idle_widget)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.setSpacing(12)
 
         idle_icon = QLabel()
-        idle_icon.setPixmap(QIcon("icons/search-alt.svg").pixmap(QSize(72, 72)))
+        idle_icon.setPixmap(QIcon("icons/FileFinder.png").pixmap(QSize(96, 96)))
         idle_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         idle_icon.setStyleSheet("background: transparent; border: none;")
 
@@ -403,7 +402,7 @@ class ResultListWidget(QListWidget):
         idle_title.setStyleSheet(f"""
             font-size: {FONT.TITLE_PT + 2}px;
             font-weight: {BTN.FONT_WEIGHT};
-            color: {COLORS.TEXT_PLACEHOLDER};
+            color: {COLORS.TEXT_TERTIARY};
             background: transparent;
             border: none;
         """)

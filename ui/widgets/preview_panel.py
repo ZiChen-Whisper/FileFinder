@@ -1245,7 +1245,7 @@ class PreviewPanel(QWidget):
         self._empty_title = QLabel("选择文件以预览")
         self._empty_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._empty_title.setStyleSheet(f"""
-            color: {COLORS.TEXT_PLACEHOLDER};
+            color: {COLORS.TEXT_TERTIARY};
             font-size: {FONT.BODY_PT}px;
             border: none; background: transparent;
         """)

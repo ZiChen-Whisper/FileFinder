@@ -15,7 +15,7 @@ from .widgets import SearchBar, ResultListWidget, FilterBar, PreviewPanel, Round
 from .widgets.filter_bar import DirListWidget
 from .widgets.common_widgets import LoadingSpinner, RoundedPanel
 from .widgets.search_scope_panel import SearchScopePanel
-from .dialogs import SettingsDialog
+from .dialogs import SettingsDialog, AboutDialog
 from .pages.welcome_page import WelcomePage
 from .pages.scan_progress import ScanProgressDialog
 from .style_constants import COLORS, FONT, RADIUS, BTN, DIALOG, TRANSITION
@@ -72,7 +72,7 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT)
         self.resize(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT)
 
-        icon = QIcon("icons/search-alt.svg")
+        icon = QIcon("icons/FileFinder.png")
         self.setWindowIcon(icon)
         self.setStyleSheet(f"""
             QMainWindow {{
@@ -349,12 +349,8 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def _on_about(self):
-        styled_msg_box(
-            self, QMessageBox.Icon.Information,
-            "关于 FileFinder",
-            "FileFinder v1.0\n\n一款轻量级的本地文件搜索桌面工具\n"
-            "帮助您通过文件名或文件内容快速定位电脑中的文件。"
-        )
+        dialog = AboutDialog(self)
+        dialog.exec()
 
     def _connect_signals(self):
         self._welcome_page.scan_requested_with_dirs.connect(self._start_scan_with_dirs)

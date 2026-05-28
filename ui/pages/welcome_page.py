@@ -26,7 +26,7 @@ class WelcomePage(QWidget):
         layout.setContentsMargins(60, 30, 60, 30)
 
         icon_label = QLabel()
-        app_icon = QIcon("icons/search-alt.svg")
+        app_icon = QIcon("icons/FileFinder.png")
         pixmap = app_icon.pixmap(QSize(96, 96))
         if pixmap.isNull():
             logo_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),

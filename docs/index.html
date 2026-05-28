@@ -1,0 +1,1203 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FileFinder 官方文档</title>
+    <style>
+        :root {
+            --brand: #2233ff;
+            --brand-light: #ebf5ff;
+            --brand-hover: #1a29d4;
+            --text-primary: #060927;
+            --text-secondary: #222222;
+            --text-tertiary: #666666;
+            --text-placeholder: #b5b5b5;
+            --bg-primary: #FFFFFF;
+            --bg-secondary: #f7f7f9;
+            --bg-tertiary: #eeeeee;
+            --border: #f2f2f2;
+            --border-hover: #d0d0d0;
+            --success: #22c55e;
+            --warning: #f59e0b;
+            --error: #ef4444;
+            --info: #3b82f6;
+            --shadow-sm: 0 1px 3px rgba(0,0,0,0.06);
+            --shadow-md: 0 4px 12px rgba(0,0,0,0.08);
+            --radius-sm: 6px;
+            --radius-md: 10px;
+            --radius-lg: 14px;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", sans-serif;
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            line-height: 1.7;
+        }
+
+        .header {
+            background: var(--bg-primary);
+            border-bottom: 1px solid var(--border);
+            padding: 20px 40px;
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            box-shadow: var(--shadow-sm);
+        }
+        .header img { width: 36px; height: 36px; }
+        .header h1 { font-size: 18px; font-weight: 700; }
+        .header .version {
+            font-size: 11px;
+            color: var(--text-tertiary);
+            background: var(--bg-secondary);
+            padding: 2px 8px;
+            border-radius: 4px;
+        }
+        .header nav {
+            margin-left: auto;
+            display: flex;
+            gap: 20px;
+        }
+        .header nav a {
+            color: var(--text-tertiary);
+            text-decoration: none;
+            font-size: 13px;
+            transition: color 0.2s;
+        }
+        .header nav a:hover { color: var(--brand); }
+
+        .layout {
+            display: flex;
+            max-width: 1200px;
+            margin: 0 auto;
+            min-height: calc(100vh - 77px);
+        }
+
+        .sidebar {
+            width: 240px;
+            flex-shrink: 0;
+            background: var(--bg-primary);
+            border-right: 1px solid var(--border);
+            padding: 24px 0;
+            position: sticky;
+            top: 77px;
+            height: calc(100vh - 77px);
+            overflow-y: auto;
+        }
+        .sidebar::-webkit-scrollbar { width: 4px; }
+        .sidebar::-webkit-scrollbar-thumb { background: var(--border-hover); border-radius: 2px; }
+        .sidebar-group { margin-bottom: 20px; }
+        .sidebar-group-title {
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--text-placeholder);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            padding: 0 20px;
+            margin-bottom: 6px;
+        }
+        .sidebar a {
+            display: block;
+            padding: 6px 20px;
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 13px;
+            border-left: 3px solid transparent;
+            transition: all 0.15s;
+        }
+        .sidebar a:hover {
+            color: var(--brand);
+            background: var(--brand-light);
+            border-left-color: var(--brand);
+        }
+        .sidebar a.active {
+            color: var(--brand);
+            background: var(--brand-light);
+            border-left-color: var(--brand);
+            font-weight: 600;
+        }
+
+        .content {
+            flex: 1;
+            padding: 32px 40px 60px;
+            min-width: 0;
+        }
+
+        h2.section-title {
+            font-size: 26px;
+            font-weight: 800;
+            color: var(--text-primary);
+            margin-bottom: 8px;
+            padding-bottom: 12px;
+            border-bottom: 2px solid var(--brand);
+            display: inline-block;
+        }
+        h3 {
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin: 28px 0 12px;
+        }
+        h4 {
+            font-size: 15px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin: 20px 0 8px;
+        }
+        p {
+            font-size: 14px;
+            color: var(--text-secondary);
+            margin-bottom: 10px;
+        }
+
+        .card {
+            background: var(--bg-primary);
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border);
+            padding: 24px;
+            margin-bottom: 20px;
+            box-shadow: var(--shadow-sm);
+        }
+        .card h3 { margin-top: 0; }
+
+        .screenshot-placeholder {
+            background: var(--bg-secondary);
+            border: 2px dashed var(--border-hover);
+            border-radius: var(--radius-md);
+            padding: 40px 20px;
+            text-align: center;
+            color: var(--text-placeholder);
+            font-size: 13px;
+            margin: 16px 0;
+        }
+        .screenshot-placeholder .icon { font-size: 28px; margin-bottom: 8px; }
+
+        .step-list {
+            counter-reset: step;
+            list-style: none;
+            padding: 0;
+        }
+        .step-list li {
+            counter-increment: step;
+            position: relative;
+            padding: 12px 16px 12px 48px;
+            margin-bottom: 8px;
+            background: var(--bg-primary);
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border);
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        .step-list li::before {
+            content: counter(step);
+            position: absolute;
+            left: 14px;
+            top: 12px;
+            width: 24px;
+            height: 24px;
+            background: var(--brand);
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: 700;
+        }
+
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+            gap: 14px;
+            margin: 16px 0;
+        }
+        .feature-item {
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            padding: 16px;
+            transition: box-shadow 0.2s;
+        }
+        .feature-item:hover { box-shadow: var(--shadow-md); }
+        .feature-item .fi-icon { font-size: 22px; margin-bottom: 6px; }
+        .feature-item .fi-title { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+        .feature-item .fi-desc { font-size: 12px; color: var(--text-tertiary); }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 12px 0;
+            font-size: 13px;
+        }
+        table th {
+            background: var(--bg-secondary);
+            padding: 10px 14px;
+            text-align: left;
+            font-weight: 600;
+            color: var(--text-primary);
+            border-bottom: 2px solid var(--border);
+        }
+        table td {
+            padding: 10px 14px;
+            border-bottom: 1px solid var(--border);
+            color: var(--text-secondary);
+        }
+        table tr:hover td { background: var(--brand-light); }
+
+        .code-block {
+            background: #1e1e2e;
+            color: #cdd6f4;
+            padding: 16px 20px;
+            border-radius: var(--radius-sm);
+            font-family: "Cascadia Code", "Fira Code", "Consolas", monospace;
+            font-size: 13px;
+            line-height: 1.6;
+            overflow-x: auto;
+            margin: 12px 0;
+        }
+        .code-block .kw { color: #cba6f7; }
+        .code-block .str { color: #a6e3a1; }
+        .code-block .cm { color: #6c7086; }
+        .code-block .fn { color: #89b4fa; }
+        .code-block .num { color: #fab387; }
+
+        code {
+            background: var(--bg-tertiary);
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: "Cascadia Code", "Fira Code", "Consolas", monospace;
+            font-size: 12px;
+            color: var(--brand);
+        }
+
+        .tip-box {
+            border-radius: var(--radius-sm);
+            padding: 14px 18px;
+            margin: 14px 0;
+            font-size: 13px;
+            display: flex;
+            gap: 10px;
+            align-items: flex-start;
+        }
+        .tip-box .tip-icon { font-size: 16px; flex-shrink: 0; margin-top: 1px; }
+        .tip-box.info { background: #eff6ff; border-left: 4px solid var(--info); color: #1e40af; }
+        .tip-box.success { background: #f0fdf4; border-left: 4px solid var(--success); color: #166534; }
+        .tip-box.warning { background: #fffbeb; border-left: 4px solid var(--warning); color: #92400e; }
+        .tip-box.error { background: #fef2f2; border-left: 4px solid var(--error); color: #991b1b; }
+
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        .badge-blue { background: var(--brand-light); color: var(--brand); }
+        .badge-green { background: #dcfce7; color: #16a34a; }
+        .badge-orange { background: #fff7ed; color: #ea580c; }
+        .badge-gray { background: var(--bg-tertiary); color: var(--text-tertiary); }
+
+        .mode-card {
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            padding: 16px 20px;
+            margin-bottom: 12px;
+        }
+        .mode-card .mode-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 6px;
+        }
+        .mode-card .mode-name { font-weight: 700; font-size: 15px; }
+        .mode-card .mode-example {
+            background: var(--bg-secondary);
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 12px;
+            margin-top: 6px;
+        }
+
+        .preview-type-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+            gap: 10px;
+            margin: 12px 0;
+        }
+        .preview-type-item {
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            padding: 12px 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .preview-type-item .pt-icon { font-size: 20px; }
+        .preview-type-item .pt-name { font-size: 13px; font-weight: 500; }
+        .preview-type-item .pt-ext { font-size: 11px; color: var(--text-tertiary); }
+
+        .faq-item {
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            margin-bottom: 8px;
+            overflow: hidden;
+        }
+        .faq-q {
+            padding: 14px 18px;
+            font-weight: 600;
+            font-size: 14px;
+            cursor: pointer;
+            background: var(--bg-primary);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .faq-q:hover { background: var(--brand-light); }
+        .faq-a {
+            padding: 14px 18px;
+            font-size: 13px;
+            color: var(--text-secondary);
+            background: var(--bg-secondary);
+            border-top: 1px solid var(--border);
+        }
+
+        .shortcut-table kbd {
+            background: var(--bg-primary);
+            border: 1px solid var(--border-hover);
+            border-radius: 4px;
+            padding: 2px 8px;
+            font-family: monospace;
+            font-size: 12px;
+            box-shadow: 0 1px 0 var(--border-hover);
+        }
+
+        .section { margin-bottom: 48px; }
+
+        @media (max-width: 900px) {
+            .sidebar { display: none; }
+            .content { padding: 24px 20px; }
+            .feature-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <img src="../icons/FileFinder.png" alt="FileFinder">
+        <h1>FileFinder 官方文档</h1>
+        <span class="version">v1.0</span>
+        <nav>
+            <a href="#quick-start">快速开始</a>
+            <a href="#search">搜索功能</a>
+            <a href="#filter">筛选排序</a>
+            <a href="#preview">文件预览</a>
+            <a href="#faq">常见问题</a>
+        </nav>
+    </div>
+
+    <div class="layout">
+        <aside class="sidebar">
+            <div class="sidebar-group">
+                <div class="sidebar-group-title">入门</div>
+                <a href="#about">关于 FileFinder</a>
+                <a href="#quick-start">快速开始</a>
+                <a href="#first-launch">首次启动</a>
+                <a href="#scan">磁盘扫描</a>
+            </div>
+            <div class="sidebar-group">
+                <div class="sidebar-group-title">搜索</div>
+                <a href="#search">搜索功能概览</a>
+                <a href="#name-search">文件名搜索</a>
+                <a href="#content-search">文件内容搜索</a>
+                <a href="#combined-search">联合搜索</a>
+                <a href="#search-scope">搜索范围</a>
+            </div>
+            <div class="sidebar-group">
+                <div class="sidebar-group-title">结果</div>
+                <a href="#filter">筛选与排序</a>
+                <a href="#result-list">结果列表</a>
+                <a href="#context-menu">右键菜单</a>
+            </div>
+            <div class="sidebar-group">
+                <div class="sidebar-group-title">预览</div>
+                <a href="#preview">文件预览</a>
+                <a href="#text-preview">文本/代码预览</a>
+                <a href="#pdf-preview">PDF 预览</a>
+                <a href="#image-preview">图片预览</a>
+                <a href="#excel-preview">Excel 预览</a>
+                <a href="#md-preview">Markdown 预览</a>
+                <a href="#other-preview">其他预览</a>
+            </div>
+            <div class="sidebar-group">
+                <div class="sidebar-group-title">参考</div>
+                <a href="#shortcuts">快捷键</a>
+                <a href="#supported-formats">支持的文件格式</a>
+                <a href="#performance">性能说明</a>
+                <a href="#config">配置文件</a>
+                <a href="#faq">常见问题</a>
+            </div>
+        </aside>
+
+        <main class="content">
+
+            <section id="about" class="section">
+                <h2 class="section-title">关于 FileFinder</h2>
+                <p>FileFinder 是一款轻量级的本地文件搜索桌面工具，帮助您通过<strong>文件名</strong>或<strong>文件内容</strong>快速定位电脑中的文件。它采用 SQLite 持久化索引，一次扫描终生复用，让搜索响应达到毫秒级。</p>
+
+                <div class="feature-grid">
+                    <div class="feature-item">
+                        <div class="fi-icon">🔍</div>
+                        <div class="fi-title">多种搜索模式</div>
+                        <div class="fi-desc">模糊、精确、通配符、正则四种匹配方式</div>
+                    </div>
+                    <div class="feature-item">
+                        <div class="fi-icon">📄</div>
+                        <div class="fi-title">内容搜索</div>
+                        <div class="fi-desc">在文件内容中搜索关键词，多线程并发</div>
+                    </div>
+                    <div class="feature-item">
+                        <div class="fi-icon">⚡</div>
+                        <div class="fi-title">极速索引</div>
+                        <div class="fi-desc">SQLite 持久化 + 内存缓存，毫秒级响应</div>
+                    </div>
+                    <div class="feature-item">
+                        <div class="fi-icon">👁️</div>
+                        <div class="fi-title">内容预览</div>
+                        <div class="fi-desc">支持文本、代码、PDF、图片、Excel 等 10+ 格式</div>
+                    </div>
+                    <div class="feature-item">
+                        <div class="fi-icon">🔄</div>
+                        <div class="fi-title">实时同步</div>
+                        <div class="fi-desc">文件系统监控，索引自动增量更新</div>
+                    </div>
+                    <div class="feature-item">
+                        <div class="fi-icon">🎯</div>
+                        <div class="fi-title">精准筛选</div>
+                        <div class="fi-desc">9 大文件分类 + 子分类 + 多种排序方式</div>
+                    </div>
+                </div>
+
+                <img src="screenshot/FileFinder 主界面截图.png" alt="FileFinder 主界面" style="width:100%; border-radius: 10px; border: 1px solid var(--border); margin: 16px 0;">
+            </section>
+
+            <section id="quick-start" class="section">
+                <h2 class="section-title">快速开始</h2>
+
+                <h3 id="first-launch">首次启动</h3>
+                <p>第一次打开 FileFinder 时，会进入<strong>初始化配置页面</strong>，引导您选择需要建立索引的目录。</p>
+
+                <img src="screenshot/初始化配置页面截图.png" alt="欢迎页 / 初始化配置页面" style="width:100%; border-radius: 10px; border: 1px solid var(--border); margin: 16px 0;">
+
+                <ol class="step-list">
+                    <li><strong>添加扫描目录</strong> — 在输入框中输入目录路径（如 <code>D:\Projects</code>），或点击「浏览...」按钮选择文件夹，然后点击「+ 添加」</li>
+                    <li><strong>快捷添加</strong> — 使用下方的快捷按钮一键添加：点击「所有驱动器」添加全部磁盘，点击「常用目录」添加桌面/文档/下载等用户目录，或点击单个盘符按钮添加指定驱动器</li>
+                    <li><strong>开始扫描</strong> — 添加至少一个目录后，点击「开始扫描」按钮，FileFinder 将遍历所选目录并建立索引</li>
+                </ol>
+
+                <div class="tip-box info">
+                    <span class="tip-icon">💡</span>
+                    <div>扫描过程中可以随时点击「取消扫描」。已扫描的部分会被保存，下次启动时会自动补全未完成的索引。扫描完成后，索引会持久化到本地数据库，后续搜索无需重新扫描。</div>
+                </div>
+            </section>
+
+            <section id="scan" class="section">
+                <h2 class="section-title">磁盘扫描</h2>
+
+                <h3>扫描流程</h3>
+                <p>点击「开始扫描」后，FileFinder 会进入扫描进度页面，实时显示扫描状态：</p>
+
+                <img src="screenshot/扫描进度页面截图.png" alt="扫描进度页面" style="width:100%; border-radius: 10px; border: 1px solid var(--border); margin: 16px 0;">
+
+                <ul>
+                    <li><strong>进度百分比</strong> — 顶部大号数字显示当前扫描进度</li>
+                    <li><strong>进度条</strong> — 可视化进度条，直观展示扫描进展</li>
+                    <li><strong>已发现文件数</strong> — 实时统计已发现的文件数量</li>
+                    <li><strong>扫描日志</strong> — 下方文本区域实时输出正在扫描的目录路径</li>
+                    <li><strong>取消按钮</strong> — 随时可以中断扫描，已扫描的数据不会丢失</li>
+                </ul>
+
+                <h3>自动索引同步</h3>
+                <p>扫描完成后，FileFinder 会通过 <strong>QFileSystemWatcher</strong> 持续监控已索引的目录。当您在文件管理器中新增、修改或删除文件时，索引会自动增量更新，无需手动重新扫描。</p>
+
+                <div class="tip-box success">
+                    <span class="tip-icon">✅</span>
+                    <div>索引数据存储在 <code>~/.filefinder/filefinder.db</code> 中，采用 SQLite WAL 模式 + 内存缓存，确保搜索响应速度。一次扫描，终生复用！</div>
+                </div>
+
+                <h3>跳过的目录</h3>
+                <p>为提高扫描效率，以下系统/开发目录会被自动跳过：</p>
+                <table>
+                    <thead>
+                        <tr><th>目录</th><th>说明</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td><code>node_modules</code></td><td>Node.js 依赖目录</td></tr>
+                        <tr><td><code>__pycache__</code></td><td>Python 缓存目录</td></tr>
+                        <tr><td><code>.git</code> / <code>.svn</code> / <code>.hg</code></td><td>版本控制目录</td></tr>
+                        <tr><td><code>.venv</code> / <code>venv</code></td><td>Python 虚拟环境</td></tr>
+                        <tr><td><code>build</code> / <code>dist</code></td><td>构建输出目录</td></tr>
+                        <tr><td><code>.idea</code> / <code>.vscode</code> / <code>.vs</code></td><td>IDE 配置目录</td></tr>
+                        <tr><td><code>$RECYCLE.BIN</code></td><td>回收站</td></tr>
+                        <tr><td><code>System Volume Information</code></td><td>系统卷信息</td></tr>
+                    </tbody>
+                </table>
+            </section>
+
+            <section id="search" class="section">
+                <h2 class="section-title">搜索功能</h2>
+
+                <p>FileFinder 的搜索栏位于主窗口顶部，提供两种搜索维度：<strong>文件名搜索</strong>和<strong>文件内容搜索</strong>。通过左侧的分段控制器（「文件名」/「文件内容」）切换搜索维度。</p>
+
+                <img src="screenshot/搜索栏截图.png" alt="搜索栏" style="width:100%; border-radius: 10px; border: 1px solid var(--border); margin: 16px 0;">
+
+                <h3 id="name-search">文件名搜索</h3>
+                <p>文件名搜索基于 SQLite 索引 + 内存缓存，响应速度极快。支持四种匹配模式，通过搜索栏下方的滑块切换：</p>
+
+                <div class="mode-card">
+                    <div class="mode-header">
+                        <span class="mode-name">模糊匹配</span>
+                        <span class="badge badge-blue">默认</span>
+                    </div>
+                    <p>在文件名中任意位置匹配关键词，是最常用的搜索方式。不区分大小写（除非勾选「区分大小写」）。</p>
+                    <div class="mode-example">
+                        输入 <code>read</code> → 匹配 README.md、spreadsheet.xlsx、readme.txt
+                    </div>
+                </div>
+
+                <div class="mode-card">
+                    <div class="mode-header">
+                        <span class="mode-name">精确匹配</span>
+                        <span class="badge badge-gray">严格</span>
+                    </div>
+                    <p>文件名（含扩展名）必须完全一致才匹配。</p>
+                    <div class="mode-example">
+                        输入 <code>main.py</code> → 只匹配 main.py，不匹配 main.pyc 或 mymain.py
+                    </div>
+                </div>
+
+                <div class="mode-card">
+                    <div class="mode-header">
+                        <span class="mode-name">通配符匹配</span>
+                        <span class="badge badge-orange">高级</span>
+                    </div>
+                    <p>使用 <code>*</code> 和 <code>?</code> 通配符进行模式匹配。<code>*</code> 匹配任意多个字符，<code>?</code> 匹配单个字符。</p>
+                    <div class="mode-example">
+                        输入 <code>*.py</code> → 匹配所有 Python 文件<br>
+                        输入 <code>test_?.py</code> → 匹配 test_a.py、test_1.py 等
+                    </div>
+                </div>
+
+                <div class="mode-card">
+                    <div class="mode-header">
+                        <span class="mode-name">正则表达式</span>
+                        <span class="badge badge-orange">高级</span>
+                    </div>
+                    <p>使用正则表达式进行高级模式匹配，适合有经验的用户。</p>
+                    <div class="mode-example">
+                        输入 <code>\d+\.py</code> → 匹配 123.py、1.py 等以数字开头的 Python 文件<br>
+                        输入 <code>^(main|app)</code> → 匹配以 main 或 app 开头的文件
+                    </div>
+                </div>
+
+                <div class="tip-box info">
+                    <span class="tip-icon">💡</span>
+                    <div>点击匹配模式滑块右侧的 <strong>?</strong> 图标，可以打开「匹配模式说明」弹窗，随时查看各模式的用法和示例。</div>
+                </div>
+
+                <h4>相关度评分</h4>
+                <p>文件名搜索结果按相关度评分排序，评分规则如下：</p>
+                <table>
+                    <thead>
+                        <tr><th>匹配类型</th><th>分数</th><th>示例</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>精确匹配</td><td>100</td><td>搜索 <code>main.py</code>，文件名恰好为 main.py</td></tr>
+                        <tr><td>前缀匹配</td><td>80</td><td>搜索 <code>main</code>，文件名以 main 开头</td></tr>
+                        <tr><td>词边界匹配</td><td>60</td><td>搜索 <code>main</code>，匹配 my_main_file.py 中的 main</td></tr>
+                        <tr><td>子串匹配</td><td>40</td><td>搜索 <code>main</code>，匹配 remain.py 中的 main</td></tr>
+                    </tbody>
+                </table>
+
+                <h3 id="content-search">文件内容搜索</h3>
+                <p>切换到「文件内容」模式后，可以在文件内容中搜索关键词。内容搜索采用多线程并发（最多 8 个线程），支持实时进度反馈。</p>
+
+                <img src="screenshot/文件内容搜索模式截图.png" alt="文件内容搜索模式" style="width:100%; border-radius: 10px; border: 1px solid var(--border); margin: 16px 0;">
+
+                <ul>
+                    <li><strong>大小写敏感</strong> — 勾选「区分大小写」复选框后，搜索将严格区分大小写</li>
+                    <li><strong>搜索范围</strong> — 仅搜索纯文本和代码文件（自动跳过二进制文件）</li>
+                    <li><strong>文件大小限制</strong> — 默认跳过超过 10MB 的文件，避免内存占用过高</li>
+                    <li><strong>上下文行</strong> — 搜索结果会显示匹配行前后各 3 行的上下文内容</li>
+                    <li><strong>可取消</strong> — 搜索过程中可随时点击搜索按钮取消</li>
+                </ul>
+
+                <div class="tip-box warning">
+                    <span class="tip-icon">⚠️</span>
+                    <div>内容搜索模式下，匹配模式滑块和帮助图标会自动隐藏，因为内容搜索目前仅支持关键词匹配。正则表达式搜索将在后续版本中支持。</div>
+                </div>
+
+                <h3 id="combined-search">联合搜索</h3>
+                <p>FileFinder 支持同时使用文件名和内容条件进行搜索。操作方式：</p>
+                <ol class="step-list">
+                    <li>先在「文件名」模式下输入文件名关键词并搜索</li>
+                    <li>切换到「文件内容」模式，输入内容关键词并搜索</li>
+                    <li>系统自动执行联合搜索：取文件名结果与内容结果的<strong>交集</strong>，即只返回同时满足两个条件的文件</li>
+                </ol>
+
+                <div class="tip-box info">
+                    <span class="tip-icon">💡</span>
+                    <div>联合搜索的典型场景：搜索文件名包含 <code>config</code> 且内容包含 <code>database</code> 的文件，快速定位配置文件中的数据库配置项。</div>
+                </div>
+
+                <h3 id="search-scope">搜索范围</h3>
+                <p>在主界面右侧面板顶部，可以指定搜索范围。点击「指定搜索范围」区域可以展开/收起范围设置。</p>
+
+                <img src="screenshot/搜索范围面板截图.png" alt="搜索范围面板" style="width:100%; border-radius: 10px; border: 1px solid var(--border); margin: 16px 0;">
+
+                <ul>
+                    <li><strong>全部已扫描目录</strong> — 默认在所有已建立索引的目录中搜索</li>
+                    <li><strong>指定目录</strong> — 点击「选择目录」按钮，可以精确选择要搜索的目录</li>
+                    <li><strong>索引状态</strong> — 面板会显示当前索引的文件总数和各目录的扫描状态（绿色=完成、黄色=未完成、红色=失败）</li>
+                    <li><strong>重新扫描</strong> — 如果目录尚未扫描或扫描失败，可以点击「扫描」按钮重新建立索引</li>
+                </ul>
+            </section>
+
+            <section id="filter" class="section">
+                <h2 class="section-title">筛选与排序</h2>
+
+                <p>搜索栏下方是筛选栏，提供文件类型筛选和结果排序功能。</p>
+
+                <img src="screenshot/筛选栏截图.png" alt="筛选栏" style="width:100%; border-radius: 10px; border: 1px solid var(--border); margin: 16px 0;">
+
+                <h3>文件类型筛选</h3>
+                <p>筛选栏提供 9 大文件分类按钮，点击即可筛选对应类型：</p>
+
+                <table>
+                    <thead>
+                        <tr><th>分类</th><th>说明</th><th>子分类</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>全部类型</td><td>显示所有文件（默认）</td><td>—</td></tr>
+                        <tr><td>文件夹</td><td>仅显示目录</td><td>—</td></tr>
+                        <tr><td>文档</td><td>文本、PDF、Word、Excel、PPT、电子书</td><td>文本 / PDF / Word / Excel / PPT / 电子书</td></tr>
+                        <tr><td>代码</td><td>Python、JS/TS、HTML/CSS、Java、C/C++ 等</td><td>Python / JS/TS / HTML/CSS / Java / C/C++ / Go / Rust / Ruby / PHP / Shell / SQL / JSON</td></tr>
+                        <tr><td>图片</td><td>JPG、PNG、GIF、BMP、SVG、图标</td><td>JPG / PNG / GIF / BMP / SVG / 图标</td></tr>
+                        <tr><td>视频</td><td>MP4、MKV、AVI、MOV 等</td><td>MP4 / MKV / AVI / MOV / 其他</td></tr>
+                        <tr><td>音频</td><td>MP3、WAV、FLAC 等</td><td>MP3 / WAV / FLAC / 其他</td></tr>
+                        <tr><td>压缩包</td><td>ZIP、RAR、7Z、TAR 等</td><td>ZIP / RAR / 7Z / TAR</td></tr>
+                        <tr><td>其他</td><td>不属于以上分类的文件</td><td>—</td></tr>
+                    </tbody>
+                </table>
+
+                <p>选择「文档」「代码」「图片」「视频」「音频」「压缩包」等分类后，会出现<strong>子分类滑块</strong>，可以进一步筛选具体的文件格式。</p>
+
+                <h3>排序方式</h3>
+                <p>筛选栏右侧提供排序控件，支持 4 种排序方式和升降序切换：</p>
+
+                <table>
+                    <thead>
+                        <tr><th>排序方式</th><th>说明</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>名称</td><td>按文件名字母顺序排序（默认）</td></tr>
+                        <tr><td>相关度</td><td>按搜索匹配相关度评分排序</td></tr>
+                        <tr><td>修改时间</td><td>按文件最后修改时间排序</td></tr>
+                        <tr><td>大小</td><td>按文件大小排序</td></tr>
+                    </tbody>
+                </table>
+
+                <p>点击排序方式右侧的「升序」/「降序」按钮可以切换排序方向。</p>
+            </section>
+
+            <section id="result-list" class="section">
+                <h2 class="section-title">结果列表</h2>
+
+                <p>搜索结果以列表形式展示在主界面左侧，每个结果项包含以下信息：</p>
+
+                <img src="screenshot/搜索结果列表示例截图.png" alt="搜索结果列表" style="width:100%; border-radius: 10px; border: 1px solid var(--border); margin: 16px 0;">
+
+                <ul>
+                    <li><strong>文件类型图标</strong> — 根据文件扩展名显示对应的 SVG 图标（60+ 种）</li>
+                    <li><strong>文件名</strong> — 搜索关键词会在文件名中高亮显示</li>
+                    <li><strong>文件路径</strong> — 文件所在目录，过长时自动省略</li>
+                    <li><strong>文件大小</strong><>— 人类可读的大小格式（如 1.2 MB）</li>
+                    <li><strong>修改时间</strong> — 文件最后修改日期</li>
+                    <li><strong>匹配标签</strong> — 显示匹配原因（如「名称匹配」「内容匹配 N 处」）</li>
+                </ul>
+
+                <h3>分批渲染</h3>
+                <p>当搜索结果较多时，结果列表采用分批渲染策略：</p>
+                <ul>
+                    <li>初始显示最多 <strong>200</strong> 条结果</li>
+                    <li>列表底部显示「加载更多」按钮，每次加载 <strong>100</strong> 条</li>
+                    <li>最多显示 <strong>1000</strong> 条搜索结果</li>
+                </ul>
+
+                <div class="tip-box info">
+                    <span class="tip-icon">💡</span>
+                    <div>分批渲染机制确保即使搜索返回大量结果，界面也不会卡顿。每批 50 条逐步渲染到列表中。</div>
+                </div>
+
+                <h3 id="context-menu">右键菜单</h3>
+                <p>在搜索结果上点击鼠标右键，会弹出圆角右键菜单，提供以下操作：</p>
+
+                <table>
+                    <thead>
+                        <tr><th>菜单项</th><th>功能</th><th>快捷键</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>打开</td><td>使用系统默认程序打开文件</td><td>双击</td></tr>
+                        <tr><td>打开所在文件夹</td><td>在文件资源管理器中定位文件</td><td>—</td></tr>
+                        <tr><td>复制</td><td>复制文件到剪贴板（可粘贴到文件夹）</td><td>Ctrl+C</td></tr>
+                        <tr><td>复制路径</td><td>复制文件的完整路径到剪贴板</td><td>—</td></tr>
+                        <tr><td>属性</td><td>弹出文件属性对话框（名称、路径、大小、时间等）</td><td>—</td></tr>
+                    </tbody>
+                </table>
+
+                <h3>拖拽操作</h3>
+                <p>您可以从结果列表中<strong>拖拽文件</strong>到其他应用程序（如文件资源管理器、编辑器等），实现快速文件操作。拖拽时会显示自定义的文件图标拖拽预览。</p>
+            </section>
+
+            <section id="preview" class="section">
+                <h2 class="section-title">文件预览</h2>
+
+                <p>选中搜索结果后，右侧预览面板会自动显示文件内容预览。FileFinder 支持 10+ 种文件格式的预览，并带有搜索关键词高亮功能。</p>
+
+                <img src="screenshot/预览面板截图.png" alt="预览面板" style="width:100%; border-radius: 10px; border: 1px solid var(--border); margin: 16px 0;">
+
+                <div class="preview-type-grid">
+                    <div class="preview-type-item">
+                        <span class="pt-icon">📝</span>
+                        <div>
+                            <div class="pt-name">文本 / 代码</div>
+                            <div class="pt-ext">.txt .py .js .java ...</div>
+                        </div>
+                    </div>
+                    <div class="preview-type-item">
+                        <span class="pt-icon">📕</span>
+                        <div>
+                            <div class="pt-name">PDF 文档</div>
+                            <div class="pt-ext">.pdf</div>
+                        </div>
+                    </div>
+                    <div class="preview-type-item">
+                        <span class="pt-icon">🖼️</span>
+                        <div>
+                            <div class="pt-name">图片</div>
+                            <div class="pt-ext">.jpg .png .gif .svg ...</div>
+                        </div>
+                    </div>
+                    <div class="preview-type-item">
+                        <span class="pt-icon">📊</span>
+                        <div>
+                            <div class="pt-name">Excel 表格</div>
+                            <div class="pt-ext">.xlsx .xls</div>
+                        </div>
+                    </div>
+                    <div class="preview-type-item">
+                        <span class="pt-icon">📑</span>
+                        <div>
+                            <div class="pt-name">Markdown</div>
+                            <div class="pt-ext">.md</div>
+                        </div>
+                    </div>
+                    <div class="preview-type-item">
+                        <span class="pt-icon">🌐</span>
+                        <div>
+                            <div class="pt-name">HTML</div>
+                            <div class="pt-ext">.html .htm</div>
+                        </div>
+                    </div>
+                    <div class="preview-type-item">
+                        <span class="pt-icon">📄</span>
+                        <div>
+                            <div class="pt-name">Word 文档</div>
+                            <div class="pt-ext">.docx</div>
+                        </div>
+                    </div>
+                    <div class="preview-type-item">
+                        <span class="pt-icon">📦</span>
+                        <div>
+                            <div class="pt-name">压缩包</div>
+                            <div class="pt-ext">.zip .rar .7z .tar ...</div>
+                        </div>
+                    </div>
+                    <div class="preview-type-item">
+                        <span class="pt-icon">🎬</span>
+                        <div>
+                            <div class="pt-name">视频 / 音频</div>
+                            <div class="pt-ext">.mp4 .mp3 .wav ...</div>
+                        </div>
+                    </div>
+                    <div class="preview-type-item">
+                        <span class="pt-icon">📁</span>
+                        <div>
+                            <div class="pt-name">文件夹</div>
+                            <div class="pt-ext">目录内容浏览</div>
+                        </div>
+                    </div>
+                </div>
+
+                <h3 id="text-preview">文本 / 代码预览</h3>
+                <p>文本和代码文件在预览面板中以等宽字体显示，支持以下特性：</p>
+                <ul>
+                    <li><strong>语法高亮</strong> — Python、JavaScript、Markdown、JSON 等语言自动语法着色</li>
+                    <li><strong>搜索关键词高亮</strong> — 内容搜索后，匹配的关键词在预览中以醒目颜色标记</li>
+                    <li><strong>行号显示</strong> — 代码文件左侧显示行号</li>
+                    <li><strong>大文件提示</strong> — 超过 2MB 的文本文件会提示文件过大，点击可强制加载（上限 10MB）</li>
+                    <li><strong>行数限制</strong> — 最多预览 500 行，超出部分截断并提示</li>
+                </ul>
+
+                <img src="screenshot/代码文件预览截图.png" alt="代码文件预览" style="width:100%; border-radius: 10px; border: 1px solid var(--border); margin: 16px 0;">
+
+                <h3 id="pdf-preview">PDF 预览</h3>
+                <p>PDF 文件在预览面板中渲染为图片显示：</p>
+                <ul>
+                    <li><strong>分页加载</strong> — 初始加载前 5 页，点击「加载更多」可继续加载（每次 10 页）</li>
+                    <li><strong>缩放控制</strong> — 支持放大/缩小按钮和缩放滑块</li>
+                    <li><strong>适应宽度</strong> — 默认按面板宽度自适应渲染</li>
+                    <li><strong>大文件提示</strong> — 超过 10MB 的 PDF 会提示确认后再加载</li>
+                </ul>
+
+                <h3 id="image-preview">图片预览</h3>
+                <p>图片文件在预览面板中直接显示：</p>
+                <ul>
+                    <li><strong>支持格式</strong> — JPG、PNG、GIF、BMP、SVG、ICO、TIFF</li>
+                    <li><strong>GIF 动画</strong> — GIF 文件自动播放动画</li>
+                    <li><strong>缩放拖拽</strong> — 支持鼠标滚轮缩放和拖拽平移</li>
+                    <li><strong>适应窗口</strong> — 默认按面板大小自适应显示</li>
+                    <li><strong>大文件限制</strong> — 超过 200MB 的媒体文件会提示确认</li>
+                </ul>
+
+                <h3 id="excel-preview">Excel 预览</h3>
+                <p>Excel 文件以表格形式展示：</p>
+                <ul>
+                    <li><strong>Sheet 切换</strong> — 顶部标签页切换不同的 Sheet</li>
+                    <li><strong>分页加载</strong> — 每个 Sheet 初始加载前 3 页，可加载更多</li>
+                    <li><strong>表格样式</strong> — 带边框的表格布局，列宽自适应</li>
+                    <li><strong>大文件提示</strong> — 超过 10MB 的 Excel 文件会提示确认</li>
+                </ul>
+
+                <h3 id="md-preview">Markdown 预览</h3>
+                <p>Markdown 文件支持两种预览模式：</p>
+                <ul>
+                    <li><strong>渲染模式</strong> — 将 Markdown 渲染为富文本显示（标题、列表、代码块、链接等）</li>
+                    <li><strong>源码模式</strong> — 显示原始 Markdown 文本，带语法高亮</li>
+                    <li>通过预览面板顶部的切换按钮在两种模式间切换</li>
+                </ul>
+
+                <h3 id="other-preview">其他格式预览</h3>
+
+                <h4>Word 文档 (.docx)</h4>
+                <p>Word 文档以纯文本形式展示内容，超过 5MB 的文件会提示确认后再加载。</p>
+
+                <h4>HTML 文件 (.html / .htm)</h4>
+                <p>HTML 文件支持渲染模式和源码模式切换，渲染模式会显示格式化的网页内容。</p>
+
+                <h4>压缩包 (.zip / .rar / .7z / .tar 等)</h4>
+                <p>压缩包文件会自动列出内部文件清单，显示目录数和文件数，以及每个条目的名称和大小。</p>
+
+                <h4>视频 / 音频</h4>
+                <p>视频和音频文件会显示媒体属性信息（文件名、大小、格式、修改时间等），暂不支持内嵌播放。</p>
+
+                <h4>文件夹</h4>
+                <p>选中文件夹时，预览面板会显示文件夹内的子项列表，包括文件和子目录的名称、类型、大小等信息。</p>
+            </section>
+
+            <section id="shortcuts" class="section">
+                <h2 class="section-title">快捷键</h2>
+
+                <table class="shortcut-table">
+                    <thead>
+                        <tr><th>快捷键</th><th>功能</th><th>适用场景</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td><kbd>Enter</kbd></td><td>执行搜索</td><td>搜索输入框获得焦点时</td></tr>
+                        <tr><td><kbd>↑</kbd> / <kbd>↓</kbd></td><td>浏览搜索历史</td><td>搜索输入框获得焦点时</td></tr>
+                        <tr><td><kbd>Ctrl+C</kbd></td><td>复制选中文件</td><td>结果列表中选中文件时</td></tr>
+                        <tr><td>双击</td><td>使用默认程序打开文件</td><td>结果列表中</td></tr>
+                        <tr><td>右键</td><td>打开右键菜单</td><td>结果列表中</td></tr>
+                        <tr><td>拖拽</td><td>拖拽文件到其他应用</td><td>结果列表中</td></tr>
+                    </tbody>
+                </table>
+            </section>
+
+            <section id="supported-formats" class="section">
+                <h2 class="section-title">支持的文件格式</h2>
+
+                <h3>文本文件</h3>
+                <p><code>.txt</code> <code>.md</code> <code>.log</code> <code>.csv</code> <code>.xml</code> <code>.yaml</code> <code>.yml</code> <code>.ini</code> <code>.cfg</code> <code>.conf</code> <code>.toml</code> <code>.env</code> <code>.gitignore</code></p>
+
+                <h3>代码文件</h3>
+                <p><code>.py</code> <code>.js</code> <code>.ts</code> <code>.html</code> <code>.css</code> <code>.java</code> <code>.c</code> <code>.cpp</code> <code>.h</code> <code>.go</code> <code>.rs</code> <code>.rb</code> <code>.php</code> <code>.sh</code> <code>.bat</code> <code>.ps1</code> <code>.sql</code> <code>.json</code></p>
+
+                <h3>文档文件</h3>
+                <p><code>.pdf</code> <code>.docx</code> <code>.xlsx</code> <code>.pptx</code> <code>.rtf</code> <code>.epub</code></p>
+
+                <h3>图片文件</h3>
+                <p><code>.jpg</code> <code>.jpeg</code> <code>.png</code> <code>.gif</code> <code>.bmp</code> <code>.tiff</code> <code>.svg</code> <code>.ico</code></p>
+
+                <h3>视频文件</h3>
+                <p><code>.mp4</code> <code>.mkv</code> <code>.avi</code> <code>.mov</code> <code>.wmv</code> <code>.flv</code></p>
+
+                <h3>音频文件</h3>
+                <p><code>.mp3</code> <code>.wav</code> <code>.flac</code> <code>.aac</code> <code>.ogg</code> <code>.wma</code></p>
+
+                <h3>压缩包</h3>
+                <p><code>.zip</code> <code>.rar</code> <code>.7z</code> <code>.tar</code> <code>.gz</code> <code>.bz2</code> <code>.xz</code> <code>.tgz</code> <code>.tbz2</code></p>
+
+                <h3>自动排除的格式</h3>
+                <p>以下二进制格式在搜索和扫描时会被自动排除：<code>.dll</code> <code>.exe</code> <code>.sys</code> <code>.obj</code> <code>.lib</code> <code>.pdb</code> <code>.so</code> <code>.dylib</code></p>
+            </section>
+
+            <section id="performance" class="section">
+                <h2 class="section-title">性能说明</h2>
+
+                <h3>性能指标</h3>
+                <table>
+                    <thead>
+                        <tr><th>指标</th><th>参数</th><th>说明</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>搜索防抖</td><td>300ms</td><td>输入后延迟 300ms 再执行搜索，避免频繁触发</td></tr>
+                        <tr><td>最大搜索结果</td><td>1000 条</td><td>超过 1000 条结果时截断</td></tr>
+                        <tr><td>初始显示</td><td>200 条</td><td>结果列表初始显示 200 条</td></tr>
+                        <tr><td>加载更多</td><td>100 条/次</td><td>点击「加载更多」每次加载 100 条</td></tr>
+                        <tr><td>内容搜索文件大小限制</td><td>10MB</td><td>超过 10MB 的文件跳过内容搜索</td></tr>
+                        <tr><td>内容搜索线程数</td><td>4-8 个</td><td>多线程并发搜索文件内容</td></tr>
+                        <tr><td>单文件搜索超时</td><td>30 秒</td><td>单个文件内容搜索超过 30 秒自动跳过</td></tr>
+                        <tr><td>总搜索超时</td><td>120 秒</td><td>整个搜索任务超过 120 秒自动终止</td></tr>
+                        <tr><td>预览文本大小限制</td><td>2MB</td><td>超过 2MB 的文本文件提示确认后加载</td></tr>
+                        <tr><td>预览最大行数</td><td>500 行</td><td>文本预览最多显示 500 行</td></tr>
+                        <tr><td>批量写入</td><td>500 条/批</td><td>扫描时数据库每 500 条提交一次</td></tr>
+                        <tr><td>渲染批次</td><td>50 条/批</td><td>UI 分批渲染结果项，每批 50 条</td></tr>
+                    </tbody>
+                </table>
+
+                <h3>数据库优化</h3>
+                <ul>
+                    <li>采用 <strong>SQLite WAL 模式</strong>，读写互不阻塞</li>
+                    <li>缓存大小 16MB + 内存映射 64MB，加速查询</li>
+                    <li>启动时全表加载到内存缓存（SearchCache），搜索无需磁盘 IO</li>
+                    <li>文件系统监控 + 增量同步，索引实时更新</li>
+                </ul>
+
+                <div class="tip-box info">
+                    <span class="tip-icon">💡</span>
+                    <div>所有耗时操作（扫描、搜索、内容搜索）均在后台线程执行，不会阻塞 UI 主线程，确保界面始终流畅响应。</div>
+                </div>
+            </section>
+
+            <section id="config" class="section">
+                <h2 class="section-title">配置文件</h2>
+
+                <p>FileFinder 的配置文件位于 <code>~/.filefinder/config.json</code>，数据库文件位于 <code>~/.filefinder/filefinder.db</code>。</p>
+
+                <h3>配置项说明</h3>
+                <div class="code-block">
+{
+  <span class="str">"general"</span>: {
+    <span class="str">"theme"</span>: <span class="str">"system"</span>,          <span class="cm">// 主题：system / light / dark（暂未实现）</span>
+    <span class="str">"language"</span>: <span class="str">"zh_CN"</span>,       <span class="cm">// 语言（暂未实现）</span>
+    <span class="str">"auto_start"</span>: <span class="kw">false</span>,        <span class="cm">// 开机自启（暂未实现）</span>
+    <span class="str">"minimize_to_tray"</span>: <span class="kw">true</span>,   <span class="cm">// 最小化到托盘（暂未实现）</span>
+    <span class="str">"global_shortcut"</span>: <span class="str">"Ctrl+Shift+F"</span>  <span class="cm">// 全局快捷键（暂未实现）</span>
+  },
+  <span class="str">"search"</span>: {
+    <span class="str">"default_dirs"</span>: [],             <span class="cm">// 默认搜索目录</span>
+    <span class="str">"scanned_dirs"</span>: [],             <span class="cm">// 已扫描目录</span>
+    <span class="str">"scan_status"</span>: {},             <span class="cm">// 各目录扫描状态</span>
+    <span class="str">"exclude_dirs"</span>: [              <span class="cm">// 排除的目录</span>
+      <span class="str">"C:\\Windows"</span>,
+      <span class="str">"C:\\Program Files"</span>,
+      <span class="str">"node_modules"</span>,
+      <span class="str">"__pycache__"</span>,
+      <span class="str">".git"</span>,
+      <span class="str">".venv"</span>
+    ],
+    <span class="str">"exclude_extensions"</span>: [<span class="str">".dll"</span>, <span class="str">".exe"</span>, <span class="str">".sys"</span>],
+    <span class="str">"case_sensitive"</span>: <span class="kw">false</span>,      <span class="cm">// 默认大小写敏感</span>
+    <span class="str">"max_results"</span>: <span class="num">1000</span>,           <span class="cm">// 最大搜索结果数</span>
+    <span class="str">"content_max_size_mb"</span>: <span class="num">10</span>      <span class="cm">// 内容搜索文件大小上限</span>
+  },
+  <span class="str">"ui"</span>: {
+    <span class="str">"window_width"</span>: <span class="num">900</span>,           <span class="cm">// 窗口宽度</span>
+    <span class="str">"window_height"</span>: <span class="num">600</span>,          <span class="cm">// 窗口高度</span>
+    <span class="str">"preview_panel_width"</span>: <span class="num">350</span>,    <span class="cm">// 预览面板宽度</span>
+    <span class="str">"show_status_bar"</span>: <span class="kw">true</span>        <span class="cm">// 显示状态栏</span>
+  }
+}
+                </div>
+
+                <div class="tip-box warning">
+                    <span class="tip-icon">⚠️</span>
+                    <div>请勿手动修改配置文件，除非您清楚每项配置的含义。错误的配置可能导致程序异常。如需重置所有设置，可以在菜单栏选择「帮助 → 重置所有设置」。</div>
+                </div>
+            </section>
+
+            <section id="faq" class="section">
+                <h2 class="section-title">常见问题</h2>
+
+                <div class="faq-item">
+                    <div class="faq-q">
+                        <span>搜索速度慢怎么办？</span>
+                        <span>▼</span>
+                    </div>
+                    <div class="faq-a">
+                        <p>文件名搜索基于 SQLite 索引 + 内存缓存，通常在毫秒级完成。如果搜索较慢，可能是以下原因：</p>
+                        <ul>
+                            <li>索引尚未建立完成 — 请先完成磁盘扫描</li>
+                            <li>内容搜索范围过大 — 尝试缩小搜索范围或添加文件类型筛选</li>
+                            <li>索引文件数量过多 — 考虑排除不需要的目录</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="faq-item">
+                    <div class="faq-q">
+                        <span>为什么搜不到某些文件？</span>
+                        <span>▼</span>
+                    </div>
+                    <div class="faq-a">
+                        <p>可能的原因：</p>
+                        <ul>
+                            <li>文件所在目录未被扫描 — 请在搜索范围面板中确认目录已建立索引</li>
+                            <li>文件在系统排除目录中 — 如 <code>C:\Windows</code>、<code>node_modules</code> 等会被自动跳过</li>
+                            <li>文件是二进制格式 — <code>.dll</code>、<code>.exe</code> 等格式会被自动排除</li>
+                            <li>内容搜索时文件过大 — 超过 10MB 的文件会被跳过</li>
+                            <li>文件编码问题 — FileFinder 使用 charset-normalizer 自动检测编码，极少数特殊编码可能无法正确识别</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="faq-item">
+                    <div class="faq-q">
+                        <span>如何重新扫描某个目录？</span>
+                        <span>▼</span>
+                    </div>
+                    <div class="faq-a">
+                        <p>在右侧搜索范围面板中，找到需要重新扫描的目录，点击其旁边的「扫描」按钮即可。FileFinder 也支持通过文件系统监控自动增量更新索引。</p>
+                    </div>
+                </div>
+
+                <div class="faq-item">
+                    <div class="faq-q">
+                        <span>搜索时界面会卡顿吗？</span>
+                        <span>▼</span>
+                    </div>
+                    <div class="faq-a">
+                        <p>不会。所有耗时操作（磁盘扫描、文件名搜索、内容搜索）均在后台线程执行，不会阻塞 UI 主线程。搜索结果采用分批渲染（每批 50 条），确保大量结果时界面依然流畅。</p>
+                    </div>
+                </div>
+
+                <div class="faq-item">
+                    <div class="faq-q">
+                        <span>FileFinder 会上传我的文件吗？</span>
+                        <span>▼</span>
+                    </div>
+                    <div class="faq-a">
+                        <p><strong>绝对不会。</strong>FileFinder 是纯本地工具，不发起任何网络请求，不上传任何用户数据。所有索引和配置都存储在本地 <code>~/.filefinder/</code> 目录中。</p>
+                    </div>
+                </div>
+
+                <div class="faq-item">
+                    <div class="faq-q">
+                        <span>支持搜索 PDF/Word/Excel 的内容吗？</span>
+                        <span>▼</span>
+                    </div>
+                    <div class="faq-a">
+                        <p>目前内容搜索仅支持纯文本和代码文件。PDF、Word、Excel 的内容搜索功能正在开发中，将在后续版本中支持。不过，预览面板已经支持 PDF、Excel、Word 文档的预览。</p>
+                    </div>
+                </div>
+
+                <div class="faq-item">
+                    <div class="faq-q">
+                        <span>如何重置所有设置？</span>
+                        <span>▼</span>
+                    </div>
+                    <div class="faq-a">
+                        <p>通过菜单栏「帮助 → 重置所有设置」可以清除所有配置和索引数据，恢复到初始状态。注意：此操作不可撤销，重置后需要重新扫描目录。</p>
+                    </div>
+                </div>
+
+                <div class="faq-item">
+                    <div class="faq-q">
+                        <span>支持哪些操作系统？</span>
+                        <span>▼</span>
+                    </div>
+                    <div class="faq-a">
+                        <p>目前主要支持 Windows 10/11。由于使用 PySide6 框架，理论上也支持 macOS 和 Linux，但未经充分测试。</p>
+                    </div>
+                </div>
+            </section>
+
+            <section class="section">
+                <div class="card">
+                    <h3>相关链接</h3>
+                    <p>GitHub 仓库：<a href="https://github.com/ZiChen-Whisper/FileFinder" target="_blank">ZiChen-Whisper/FileFinder</a></p>
+                    <p>联系作者：<a href="mailto:3331879873@qq.com">3331879873@qq.com</a></p>
+                    <p>问题反馈：<a href="https://github.com/ZiChen-Whisper/FileFinder/issues" target="_blank">GitHub Issues</a></p>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <script>
+        const sidebarLinks = document.querySelectorAll('.sidebar a');
+        const sections = document.querySelectorAll('.section');
+
+        function updateActiveLink() {
+            let current = '';
+            sections.forEach(section => {
+                const sectionTop = section.offsetTop;
+                if (window.scrollY >= sectionTop - 120) {
+                    current = section.getAttribute('id');
+                }
+            });
+            sidebarLinks.forEach(link => {
+                link.classList.remove('active');
+                if (link.getAttribute('href') === '#' + current) {
+                    link.classList.add('active');
+                }
+            });
+        }
+
+        window.addEventListener('scroll', updateActiveLink);
+        updateActiveLink();
+
+        sidebarLinks.forEach(link => {
+            link.addEventListener('click', function(e) {
+                e.preventDefault();
+                const targetId = this.getAttribute('href').substring(1);
+                const target = document.getElementById(targetId);
+                if (target) {
+                    window.scrollTo({
+                        top: target.offsetTop - 90,
+                        behavior: 'smooth'
+                    });
+                }
+            });
+        });
+
+        document.querySelectorAll('.faq-q').forEach(q => {
+            q.addEventListener('click', function() {
+                const a = this.nextElementSibling;
+                const isVisible = a.style.display !== 'none' && a.style.display !== '';
+                a.style.display = isVisible ? 'none' : 'block';
+                this.querySelector('span:last-child').textContent = isVisible ? '▼' : '▲';
+            });
+        });
+
+        document.querySelectorAll('.faq-a').forEach(a => {
+            a.style.display = 'none';
+        });
+    </script>
+</body>
+</html>
