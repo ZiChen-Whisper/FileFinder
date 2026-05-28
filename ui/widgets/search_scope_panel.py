@@ -146,7 +146,7 @@ class SearchScopePanel(QWidget):
         self._status_dot.setFixedSize(8, 8)
         self._status_dot.setStyleSheet(f"""
             QLabel {{
-                border-radius: 4px;
+                border-radius: {RADIUS.SMALL}px;
                 background-color: {COLORS.ERROR};
                 border: none;
             }}
@@ -254,7 +254,7 @@ class SearchScopePanel(QWidget):
         if dir_count == 0:
             self._status_dot.setStyleSheet(f"""
                 QLabel {{
-                    border-radius: 4px;
+                    border-radius: {RADIUS.SMALL}px;
                     background-color: {COLORS.ERROR};
                     border: none;
                 }}
@@ -280,7 +280,7 @@ class SearchScopePanel(QWidget):
             dot_tip = "已索引"
         self._status_dot.setStyleSheet(f"""
             QLabel {{
-                border-radius: 4px;
+                border-radius: {RADIUS.SMALL}px;
                 background-color: {dot_color};
                 border: none;
             }}
@@ -291,7 +291,7 @@ class SearchScopePanel(QWidget):
         if incomplete_count > 0:
             status_text = f" · {incomplete_count} 个目录未完成扫描"
 
-        header_text = f"{dir_count} 个目录" + (f" · 已索引 {self._indexed_count:,} 个文件（索引仅加速文件名搜索）" if self._indexed_count > 0 else " · 未索引（扫描可加速文件名搜索）") + status_text
+        header_text = f"{dir_count} 个目录" + (f" · 已索引 {self._indexed_count:,} 个文件（索引可加速搜索）" if self._indexed_count > 0 else " · 未索引（扫描可加速文件名搜索）") + status_text
         self._status_label.setText(header_text)
         if incomplete_count > 0:
             self._status_label.setStyleSheet(f"font-size: {BTN.TAG_FONT_SIZE}; color: {COLORS.WARNING}; border: none; background: transparent;")

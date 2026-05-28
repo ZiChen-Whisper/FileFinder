@@ -7,14 +7,9 @@ from typing import List, Optional, Tuple
 from models import FileItem, SearchQuery, SearchResult, ContentMatch
 from utils.path_helper import get_file_info, is_excluded_directory
 from .file_parser import ParserRegistry
+from constants import CONTENT_MAX_FILE_SIZE_MB, CONTENT_SEARCH_BATCH_SIZE, MAX_MATCHES_PER_FILE, CONTEXT_LINES_BEFORE, CONTEXT_LINES_AFTER, SEARCH_TIMEOUT_SECONDS, SINGLE_FILE_SEARCH_TIMEOUT, MIN_CONTENT_WORKERS, MAX_CONTENT_WORKERS
 
 logger = logging.getLogger(__name__)
-
-# 内容搜索文件大小限制 (10MB)
-MAX_CONTENT_FILE_SIZE = 10 * 1024 * 1024
-
-# 搜索批次大小
-BATCH_SIZE = 50
 
 
 class ContentSearcher(QObject):
@@ -113,7 +108,7 @@ class ContentSearcher(QObject):
                             # 利用 DirEntry 缓存的 stat 信息，避免额外系统调用
                             try:
                                 stat = entry.stat(follow_symlinks=False)
-                                if stat.st_size > MAX_CONTENT_FILE_SIZE:
+                                if stat.st_size > CONTENT_MAX_FILE_SIZE_MB * 1024 * 1024:
                                     continue
                             except OSError:
                                 continue
@@ -168,8 +163,8 @@ class ContentSearcher(QObject):
         lines = content.split('\n')
         for line_num, line in enumerate(lines, 1):
             for match in regex.finditer(line):
-                context_before = lines[max(0, line_num - 4):line_num - 1]
-                context_after = lines[line_num:min(line_num + 3, len(lines))]
+                context_before = lines[max(0, line_num - (CONTEXT_LINES_BEFORE + 1)):line_num - 1]
+                context_after = lines[line_num:min(line_num + CONTEXT_LINES_AFTER, len(lines))]
 
                 matches.append(ContentMatch(
                     line_number=line_num,
@@ -180,7 +175,7 @@ class ContentSearcher(QObject):
                     context_after=context_after
                 ))
 
-                if len(matches) >= 10:
+                if len(matches) >= MAX_MATCHES_PER_FILE:
                     return matches
 
         return matches
@@ -271,7 +266,7 @@ class ContentSearcher(QObject):
                             page_number=page_idx + 1,
                             page_rect=rect
                         ))
-                        if len(matches) >= 10:
+                        if len(matches) >= MAX_MATCHES_PER_FILE:
                             doc.close()
                             return matches
                     continue
@@ -289,8 +284,8 @@ class ContentSearcher(QObject):
                             rect = rects[rect_idx]
                             rect_idx += 1
 
-                        context_before = lines[max(0, line_num - 4):line_num - 1]
-                        context_after = lines[line_num:min(line_num + 3, len(lines))]
+                        context_before = lines[max(0, line_num - (CONTEXT_LINES_BEFORE + 1)):line_num - 1]
+                        context_after = lines[line_num:min(line_num + CONTEXT_LINES_AFTER, len(lines))]
 
                         matches.append(ContentMatch(
                             line_number=line_num,
@@ -303,7 +298,7 @@ class ContentSearcher(QObject):
                             page_rect=rect
                         ))
 
-                        if len(matches) >= 10:
+                        if len(matches) >= MAX_MATCHES_PER_FILE:
                             doc.close()
                             return matches
         except Exception as e:
@@ -476,7 +471,7 @@ class ContentSearcher(QObject):
             return all_results
 
         # 使用 CPU 核心数作为线程数，至少4个，最多不超过8个
-        max_workers = min(max(os.cpu_count() or 4, 4), 8)
+        max_workers = min(max(os.cpu_count() or MIN_CONTENT_WORKERS, MIN_CONTENT_WORKERS), MAX_CONTENT_WORKERS)
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             # 逐文件提交任务，实现更均衡的负载分配和更精确的进度
@@ -488,13 +483,13 @@ class ContentSearcher(QObject):
                 futures[future] = file_path
 
             try:
-                for future in as_completed(futures, timeout=120):
+                for future in as_completed(futures, timeout=SEARCH_TIMEOUT_SECONDS):
                     if self._canceled:
                         executor.shutdown(wait=False, cancel_futures=True)
                         break
 
                     try:
-                        result, file_path = future.result(timeout=30)
+                        result, file_path = future.result(timeout=SINGLE_FILE_SEARCH_TIMEOUT)
                     except Exception as e:
                         logger.warning(f"搜索文件异常: {type(e).__name__}: {e}")
                         processed += 1

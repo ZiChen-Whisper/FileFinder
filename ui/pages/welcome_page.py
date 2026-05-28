@@ -5,7 +5,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
 from PySide6.QtCore import Qt, Signal, QSize
 from PySide6.QtGui import QFont, QIcon, QPixmap, QPainter, QColor, QPen
 
-from ..style_constants import COLORS, FONT
+from ..style_constants import COLORS, FONT, BTN, RADIUS, SPACING
 from ..style_manager import (button_primary, button_secondary, button_small_secondary,
                              input_style, list_style, dialog_title_style)
 from ..widgets.filter_bar import DirListWidget
@@ -57,13 +57,13 @@ class WelcomePage(QWidget):
 
         browse_btn = QPushButton("浏览...")
         browse_btn.setFixedSize(80, 40)
-        browse_btn.setStyleSheet(button_secondary("padding: 0px 14px; border-radius: 10px;"))
+        browse_btn.setStyleSheet(button_secondary(f"padding: 0px 14px; border-radius: {BTN.BORDER_RADIUS}px;"))
         browse_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         browse_btn.clicked.connect(self._on_browse)
 
         add_btn = QPushButton("+ 添加")
         add_btn.setFixedSize(80, 40)
-        add_btn.setStyleSheet(button_primary("padding: 0px 14px; border-radius: 10px;"))
+        add_btn.setStyleSheet(button_primary(f"padding: 0px 14px; border-radius: {BTN.BORDER_RADIUS}px;"))
         add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         add_btn.clicked.connect(self._on_add_dir)
 
@@ -108,7 +108,7 @@ class WelcomePage(QWidget):
 
         self._start_btn = QPushButton("开始扫描")
         self._start_btn.setFixedSize(220, 48)
-        self._start_btn.setStyleSheet(button_primary("padding: 10px 20px; border-radius: 12px; font-size: 16px;"))
+        self._start_btn.setStyleSheet(button_primary(f"padding: {SPACING.LG}px {SPACING.XXL}px; border-radius: {RADIUS.XLARGE}px; font-size: {FONT.DISPLAY_PT}px;"))
         self._start_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._start_btn.setEnabled(False)
         self._start_btn.clicked.connect(self._on_start_scan)

@@ -2,7 +2,7 @@ from PySide6.QtWidgets import (QDialog, QVBoxLayout, QFrame, QWidget, QHBoxLayou
                              QLabel, QPushButton, QSizePolicy, QGraphicsDropShadowEffect)
 from PySide6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QRectF, QParallelAnimationGroup, Property, QSize, QPointF
 from PySide6.QtGui import QFont, QColor, QPainter, QPen, QPixmap, QPolygonF
-from .style_constants import COLORS, FONT, RADIUS, DIALOG
+from .style_constants import COLORS, FONT, RADIUS, BTN, DIALOG
 from .style_manager import dialog_frame_style, dialog_title_style, button_primary, button_secondary, dialog_body_style
 
 
@@ -283,9 +283,9 @@ class ModernMessageBox(ModernDialogBase):
                 btn = QPushButton(label)
                 btn.setCursor(Qt.CursorShape.PointingHandCursor)
                 if style_type == 'primary':
-                    btn.setStyleSheet(button_primary("padding: 8px 28px; border-radius: 10px; min-width: 80px;"))
+                    btn.setStyleSheet(button_primary(f"padding: {BTN.PADDING_V} {BTN.PADDING_H_WIDE}; border-radius: {BTN.BORDER_RADIUS}px; min-width: {BTN.MIN_WIDTH};"))
                 else:
-                    btn.setStyleSheet(button_secondary("padding: 8px 28px; border-radius: 10px; min-width: 80px;"))
+                    btn.setStyleSheet(button_secondary(f"padding: {BTN.PADDING_V} {BTN.PADDING_H_WIDE}; border-radius: {BTN.BORDER_RADIUS}px; min-width: {BTN.MIN_WIDTH};"))
                 btn.clicked.connect(lambda checked, k=key: self._on_button(k))
                 btn_row.addWidget(btn)
                 btn_row.addSpacing(DIALOG.BUTTON_SPACING)
@@ -302,38 +302,38 @@ class ModernMessageBox(ModernDialogBase):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         if self._icon_type == 'warning':
-            painter.setBrush(QColor(245, 158, 11))
+            painter.setBrush(QColor(COLORS.WARNING))
             painter.setPen(Qt.PenStyle.NoPen)
             tri = QPolygonF()
             tri.append(QPointF(24, 6))
             tri.append(QPointF(44, 42))
             tri.append(QPointF(4, 42))
             painter.drawPolygon(tri)
-            painter.setPen(QPen(QColor(255, 255, 255), 3))
+            painter.setPen(QPen(QColor(COLORS.BG_PRIMARY), 3))
             painter.drawLine(24, 18, 24, 30)
             painter.drawPoint(24, 35)
         elif self._icon_type == 'error':
-            painter.setBrush(QColor(239, 68, 68))
+            painter.setBrush(QColor(COLORS.ERROR))
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.drawRoundedRect(4, 4, 40, 40, 10, 10)
-            painter.setPen(QPen(QColor(255, 255, 255), 3))
+            painter.drawRoundedRect(4, 4, 40, 40, RADIUS.LARGE, RADIUS.LARGE)
+            painter.setPen(QPen(QColor(COLORS.BG_PRIMARY), 3))
             painter.drawLine(16, 16, 32, 32)
             painter.drawLine(32, 16, 16, 32)
         elif self._icon_type == 'question':
-            painter.setBrush(QColor(59, 130, 246))
+            painter.setBrush(QColor(COLORS.INFO))
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.drawRoundedRect(4, 4, 40, 40, 10, 10)
-            painter.setPen(QColor(255, 255, 255))
+            painter.drawRoundedRect(4, 4, 40, 40, RADIUS.LARGE, RADIUS.LARGE)
+            painter.setPen(QColor(COLORS.BG_PRIMARY))
             font = QFont()
-            font.setPointSize(24)
+            font.setPointSize(FONT.ICON_LARGE_PT)
             font.setBold(True)
             painter.setFont(font)
             painter.drawText(QRectF(4, 4, 40, 40), Qt.AlignmentFlag.AlignCenter, "?")
         else:
-            painter.setBrush(QColor(16, 185, 129))
+            painter.setBrush(QColor(COLORS.SUCCESS))
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.drawRoundedRect(4, 4, 40, 40, 10, 10)
-            painter.setPen(QPen(QColor(255, 255, 255), 3))
+            painter.drawRoundedRect(4, 4, 40, 40, RADIUS.LARGE, RADIUS.LARGE)
+            painter.setPen(QPen(QColor(COLORS.BG_PRIMARY), 3))
             painter.drawLine(14, 24, 21, 32)
             painter.drawLine(21, 32, 34, 16)
 

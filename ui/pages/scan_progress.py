@@ -5,7 +5,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
 
-from ..style_constants import COLORS, FONT, DIALOG
+from ..style_constants import COLORS, FONT, SPACING, DIALOG
 from ..style_manager import (dialog_title_style, label_body_style,
                              progress_bar_style, progress_bar_success_style,
                              progress_bar_warning_style, progress_bar_error_style,
@@ -39,7 +39,7 @@ class ScanProgressDialog(QWidget):
 
         self._percentage = QLabel("0%")
         pct_font = QFont()
-        pct_font.setPointSize(48)
+        pct_font.setPointSize(FONT.DISPLAY_XL_PT)
         pct_font.setBold(True)
         self._percentage.setFont(pct_font)
         self._percentage.setStyleSheet(f"color: {COLORS.BRAND}; border: none; background: transparent;")
@@ -152,9 +152,9 @@ class ScanProgressDialog(QWidget):
         filename = os.path.basename(file_path)
         # 使用 append 逐条添加，QTextEdit 会自动处理 HTML
         self._scan_log.append(
-            f"<span style='color: {COLORS.TEXT_PLACEHOLDER}; font-size: 11px;'>"
+            f"<span style='color: {COLORS.TEXT_PLACEHOLDER}; font-size: {FONT.MICRO_PT}px;'>"
             f"[{self._file_log_count:,}]</span> {filename} "
-            f"<span style='color: {COLORS.TEXT_PLACEHOLDER}; font-size: 11px;'>"
+            f"<span style='color: {COLORS.TEXT_PLACEHOLDER}; font-size: {FONT.MICRO_PT}px;'>"
             f"{file_path}</span>"
         )
         # 每隔一定数量自动滚动，避免频繁滚动影响性能

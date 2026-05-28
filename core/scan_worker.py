@@ -4,6 +4,7 @@ import logging
 from PySide6.QtCore import QThread, Signal
 
 from config import SCAN_STATUS_COMPLETE, SCAN_STATUS_INCOMPLETE, SCAN_STATUS_FAILED, SCAN_STATUS_SCANNING, set_scan_status
+from constants import SKIP_DIR_NAMES, BATCH_SIZE, CONTENT_INDEX_BATCH_SIZE, SCAN_PROGRESS_INTERVAL, FILE_LOG_INTERVAL, FILE_LOG_BATCH_SIZE
 
 logger = logging.getLogger(__name__)
 
@@ -18,14 +19,6 @@ class ScanWorker(QThread):
     # 内容索引阶段信号：(已索引文件数, 总文件数, 当前文件路径)
     content_index_progress = Signal(int, int, str)
 
-    SKIP_DIR_NAMES = frozenset({
-        'node_modules', '__pycache__', '.git', '.svn', '.hg',
-        '.venv', 'venv', '.tox', '.eggs', 'build', 'dist',
-        '.idea', '.vscode', '.vs', '$RECYCLE.BIN',
-        'System Volume Information', 'Windows',
-        'Program Files', 'Program Files (x86)', 'ProgramData'
-    })
-
     def __init__(self, search_dirs, exclude_dirs, parent=None):
         super().__init__(parent)
         self._search_dirs = search_dirs
@@ -34,18 +27,18 @@ class ScanWorker(QThread):
         )
         self._cancelled = False
         self._last_progress_time = 0
-        self._progress_interval = 0.3
-        self._batch_size = 500
+        self._progress_interval = SCAN_PROGRESS_INTERVAL
+        self._batch_size = BATCH_SIZE
         self._total_dirs = 0
         self._file_log_batch = []
-        self._file_log_interval = 0.1
+        self._file_log_interval = FILE_LOG_INTERVAL
         self._last_file_log_time = 0
 
     def cancel(self):
         self._cancelled = True
 
     def _should_skip_dir(self, name, full_path):
-        if name in self.SKIP_DIR_NAMES:
+        if name in SKIP_DIR_NAMES:
             return True
         if name.startswith('.') or name.startswith('$'):
             return True
@@ -108,7 +101,7 @@ class ScanWorker(QThread):
 
         indexed = 0
         batch = []
-        batch_size = 50  # 内容索引批量大小（每条内容较大，不宜过大）
+        batch_size = CONTENT_INDEX_BATCH_SIZE  # 内容索引批量大小（每条内容较大，不宜过大）
         last_progress_time = time.time()
 
         for file_path, file_name in files_to_index:
@@ -257,7 +250,7 @@ class ScanWorker(QThread):
                             file_count += 1
                             self._file_log_batch.append(file_path)
                             now = time.time()
-                            if len(self._file_log_batch) >= 50 or now - self._last_file_log_time >= self._file_log_interval:
+                            if len(self._file_log_batch) >= FILE_LOG_BATCH_SIZE or now - self._last_file_log_time >= self._file_log_interval:
                                 for fp in self._file_log_batch:
                                     self.file_found.emit(fp)
                                 self._file_log_batch.clear()

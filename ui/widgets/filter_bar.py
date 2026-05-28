@@ -597,7 +597,7 @@ class FilterBar(QWidget):
                 background-color: {COLORS.BG_PRIMARY};
                 border: 1px solid {COLORS.BORDER_DEFAULT};
                 border-radius: {RADIUS.LARGE}px;
-                padding: 6px 10px;
+                padding: {BTN.TAG_PADDING_V} {BTN.TAG_PADDING_H};
             }}
         """)
         sort_card_layout = QHBoxLayout(sort_card)
@@ -638,7 +638,7 @@ class FilterBar(QWidget):
                 background-color: transparent;
                 color: {COLORS.TEXT_SECONDARY};
                 font-size: {BTN.SMALL_FONT_SIZE};
-                padding: 2px 8px;
+                padding: {BTN.SMALL_PADDING_V} {BTN.SMALL_PADDING_H};
             }}
             QPushButton:hover {{
                 background-color: {COLORS.BG_HOVER};

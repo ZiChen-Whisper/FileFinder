@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional, List
+from constants import MAX_SEARCH_RESULTS
 
 @dataclass
 class SearchQuery:
@@ -20,7 +21,7 @@ class SearchQuery:
     date_to: Optional[datetime] = None
     include_dirs: List[str] = field(default_factory=list)
     exclude_dirs: List[str] = field(default_factory=list)
-    max_results: int = 1000
+    max_results: int = MAX_SEARCH_RESULTS
 
     @property
     def has_name_query(self) -> bool:

@@ -3,6 +3,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Optional, List, Set
 from utils.encoding import read_text_file
+from constants import TEXT_EXTENSIONS, CODE_EXTENSIONS
 
 logger = logging.getLogger(__name__)
 
@@ -30,11 +31,7 @@ class TextParser(FileParser):
     """纯文本解析器"""
 
     def __init__(self):
-        self._text_exts = {'.txt', '.md', '.log', '.csv', '.json', '.xml',
-                           '.yaml', '.yml', '.ini', '.cfg', '.conf', '.toml', '.env', '.gitignore',
-                           '.py', '.js', '.ts', '.html', '.css', '.java',
-                           '.c', '.cpp', '.h', '.go', '.rs', '.rb', '.php',
-                           '.sh', '.bat', '.ps1', '.sql'}
+        self._text_exts = TEXT_EXTENSIONS | CODE_EXTENSIONS
 
     def can_parse(self, file_path: str) -> bool:
         """判断文件是否为纯文本文件"""

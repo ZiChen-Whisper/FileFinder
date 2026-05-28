@@ -7,10 +7,11 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor
 
 from ..modern_dialog import ModernDialogBase, styled_msg_box
-from ..style_constants import COLORS, DIALOG
+from ..style_constants import COLORS, RADIUS, DIALOG
 from ..style_manager import (button_primary, button_secondary, button_small_primary,
                              button_small_secondary, input_style, label_caption_style,
                              label_micro_style, tree_widget_style)
+from constants import TREE_EXPAND_BATCH_SIZE
 from config import get_scan_status, SCAN_STATUS_INCOMPLETE, SCAN_STATUS_FAILED
 
 logger = logging.getLogger(__name__)
@@ -165,10 +166,10 @@ class ScopeSelectionDialog(ModernDialogBase):
             item.setData(0, Qt.ItemDataRole.UserRole + 1, 'scanned')
             item.setToolTip(0, d)
             if scan_status == SCAN_STATUS_INCOMPLETE:
-                item.setForeground(0, QColor(245, 158, 11))
+                item.setForeground(0, QColor(COLORS.WARNING))
                 item.setToolTip(0, f"{d}\n扫描未完成，搜索结果可能不完整")
             elif scan_status == SCAN_STATUS_FAILED:
-                item.setForeground(0, QColor(239, 68, 68))
+                item.setForeground(0, QColor(COLORS.ERROR))
                 item.setToolTip(0, f"{d}\n扫描失败，请重新扫描此目录")
             if self._has_subdirectories(d):
                 self._add_placeholder(item)
@@ -287,7 +288,7 @@ class ScopeSelectionDialog(ModernDialogBase):
             self._expand_timer.start(0)
 
     def _expand_next_batch(self):
-        batch_size = 15
+        batch_size = TREE_EXPAND_BATCH_SIZE
         new_queue = []
         for _ in range(batch_size):
             if self._expand_index >= len(self._expand_queue):
@@ -457,7 +458,7 @@ class ScopeSelectionDialog(ModernDialogBase):
         item.setData(0, Qt.ItemDataRole.UserRole + 1, tag)
         item.setToolTip(0, path)
         if not is_scanned:
-            item.setForeground(0, QColor(239, 68, 68))
+            item.setForeground(0, QColor(COLORS.ERROR))
         if self._has_subdirectories(path):
             self._add_placeholder(item)
         else:

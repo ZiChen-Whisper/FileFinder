@@ -1,5 +1,6 @@
 from PySide6.QtCore import QTimer, QObject
 from typing import Callable, Any
+from constants import SEARCH_DEBOUNCE_MS
 
 class Debouncer(QObject):
     """
@@ -10,7 +11,7 @@ class Debouncer(QObject):
         parent: 父对象
     """
     
-    def __init__(self, delay_ms: int = 300, parent=None):
+    def __init__(self, delay_ms: int = SEARCH_DEBOUNCE_MS, parent=None):
         super().__init__(parent)
         self._delay_ms = delay_ms
         self._timer = QTimer()

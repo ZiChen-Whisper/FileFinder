@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (QListWidget, QListWidgetItem, QWidget, QVBoxLayou
 from PySide6.QtGui import QFont, QIcon, QFontMetrics, QDrag, QPixmap, QPainter, QColor, QPen, QKeySequence, QPainterPath
 from PySide6.QtCore import Qt, Signal, QSize, QMimeData, QUrl, QPoint, QRectF, QTimer
 from models import SearchResult
+from constants import INITIAL_DISPLAY_LIMIT, LOAD_MORE_BATCH, RENDER_BATCH_SIZE
 from ..style_constants import COLORS, FONT, RADIUS, BTN
 from ..style_manager import (
     scrollbar_style, menu_style, badge_style, badge_brand_style,
@@ -143,7 +144,7 @@ class ResultItemWidget(QFrame):
 
         match_badge = self._get_match_badge()
         match_label = QLabel(match_badge)
-        match_label.setStyleSheet(f"color: {COLORS.BRAND}; font-size: {BTN.SMALL_FONT_SIZE}; font-weight: bold; background: transparent; border: none;")
+        match_label.setStyleSheet(f"color: {COLORS.BRAND}; font-size: {BTN.SMALL_FONT_SIZE}; font-weight: {BTN.FONT_WEIGHT}; background: transparent; border: none;")
 
         name_row.addWidget(name_label, 1)
         if match_badge:
@@ -234,9 +235,6 @@ class ResultListWidget(QListWidget):
     result_selected = Signal(object)
     status_info_requested = Signal(object)
 
-    INITIAL_DISPLAY_LIMIT = 200
-    LOAD_MORE_BATCH = 100
-
     def __init__(self, parent=None):
         super().__init__(parent)
         self._results = []
@@ -284,8 +282,8 @@ class ResultListWidget(QListWidget):
         self._progress_label = QLabel("正在搜索...")
         self._progress_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._progress_label.setStyleSheet(f"""
-            font-size: 15px;
-            font-weight: bold;
+            font-size: {FONT.TITLE_PT}px;
+            font-weight: {BTN.FONT_WEIGHT};
             color: {COLORS.TEXT_SECONDARY};
             background: transparent;
             border: none;
@@ -360,7 +358,7 @@ class ResultListWidget(QListWidget):
         self._empty_text_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._empty_text_label.setStyleSheet(f"""
             font-size: {FONT.TITLE_PT}px;
-            font-weight: bold;
+            font-weight: {BTN.FONT_WEIGHT};
             color: {COLORS.TEXT_PLACEHOLDER};
             background: transparent;
             border: none;
@@ -404,7 +402,7 @@ class ResultListWidget(QListWidget):
         idle_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         idle_title.setStyleSheet(f"""
             font-size: {FONT.TITLE_PT + 2}px;
-            font-weight: bold;
+            font-weight: {BTN.FONT_WEIGHT};
             color: {COLORS.TEXT_PLACEHOLDER};
             background: transparent;
             border: none;
@@ -472,7 +470,7 @@ class ResultListWidget(QListWidget):
         if not remaining:
             self._load_more_widget.setVisible(False)
             return
-        batch = remaining[:self.LOAD_MORE_BATCH]
+        batch = remaining[:LOAD_MORE_BATCH]
         self.setUpdatesEnabled(False)
         for result in batch:
             idx = len(self._results)
@@ -650,7 +648,7 @@ class ResultListWidget(QListWidget):
 
     def set_results(self, results):
         self._all_results = list(results)
-        self._pending_results = self._all_results[:self.INITIAL_DISPLAY_LIMIT]
+        self._pending_results = self._all_results[:INITIAL_DISPLAY_LIMIT]
         self._pending_index = 0
         self._results.clear()
         self._item_widgets.clear()
@@ -670,7 +668,7 @@ class ResultListWidget(QListWidget):
                 self._position_load_more()
             return
 
-        batch_size = 50
+        batch_size = RENDER_BATCH_SIZE
         end = min(self._pending_index + batch_size, len(self._pending_results))
         self.setUpdatesEnabled(False)
         for i in range(self._pending_index, end):
@@ -955,11 +953,11 @@ class ResultListWidget(QListWidget):
 
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(QColor(0, 0, 0, 20))
-            painter.drawRoundedRect(2, 3, pm_w - 2, pm_h - 3, 10, 10)
+            painter.drawRoundedRect(2, 3, pm_w - 2, pm_h - 3, RADIUS.LARGE, RADIUS.LARGE)
 
             painter.setBrush(QColor(COLORS.BG_PRIMARY))
             painter.setPen(QPen(QColor(COLORS.BORDER_DEFAULT), 1))
-            painter.drawRoundedRect(0, 0, pm_w - 2, pm_h - 3, 10, 10)
+            painter.drawRoundedRect(0, 0, pm_w - 2, pm_h - 3, RADIUS.LARGE, RADIUS.LARGE)
 
             icon_pixmap = icon.pixmap(QSize(28, 28))
             painter.drawPixmap(10, (pm_h - 3 - 28) // 2, icon_pixmap)
@@ -987,11 +985,11 @@ class ResultListWidget(QListWidget):
 
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(QColor(0, 0, 0, 20))
-            painter.drawRoundedRect(2, 3, pm_w - 2, pm_h - 3, 10, 10)
+            painter.drawRoundedRect(2, 3, pm_w - 2, pm_h - 3, RADIUS.LARGE, RADIUS.LARGE)
 
             painter.setBrush(QColor(COLORS.BRAND))
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.drawRoundedRect(0, 0, pm_w - 2, pm_h - 3, 10, 10)
+            painter.drawRoundedRect(0, 0, pm_w - 2, pm_h - 3, RADIUS.LARGE, RADIUS.LARGE)
 
             painter.setPen(QColor(COLORS.BG_PRIMARY))
             font = QFont()

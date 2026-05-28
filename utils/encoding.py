@@ -1,6 +1,7 @@
 import os
 from typing import Optional
 import charset_normalizer
+from constants import CONTENT_MAX_FILE_SIZE_MB
 
 def detect_file_encoding(file_path: str) -> str:
     """
@@ -36,7 +37,7 @@ def detect_file_encoding(file_path: str) -> str:
 
     return 'utf-8'
 
-def read_text_file(file_path: str, max_size_mb: int = 10) -> Optional[str]:
+def read_text_file(file_path: str, max_size_mb: int = CONTENT_MAX_FILE_SIZE_MB) -> Optional[str]:
     """
     安全读取文本文件。
     

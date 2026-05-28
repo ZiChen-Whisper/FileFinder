@@ -30,12 +30,17 @@ from config import (get_exclude_dirs, get_max_results, is_first_launch,
                     SCAN_STATUS_COMPLETE, SCAN_STATUS_INCOMPLETE, SCAN_STATUS_FAILED,
                     SCAN_STATUS_SCANNING, set_scan_status, set_scan_status_batch,
                     get_scan_status)
+from constants import (DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT, WINDOW_MIN_WIDTH,
+                       WINDOW_MIN_HEIGHT, PREVIEW_PANEL_MIN_WIDTH, CONTENT_MAX_FILE_SIZE_MB,
+                       BACKGROUND_TASK_WORKERS, FS_REFRESH_DEBOUNCE_MS, FILTER_DEBOUNCE_MS,
+                       INITIAL_DISPLAY_LIMIT)
 
 logger = logging.getLogger(__name__)
 
 
 class MainWindow(QMainWindow):
     _fs_paths_ready = Signal(list)
+    _startup_sync_done = Signal(int, int, int)  # added, deleted, updated
 
     def __init__(self):
         super().__init__()
@@ -47,22 +52,25 @@ class MainWindow(QMainWindow):
         self._selected_dirs = set()
         self._fs_watcher = QFileSystemWatcher(self)
         self._fs_watcher.directoryChanged.connect(self._on_fs_directory_changed)
+        self._fs_watcher.fileChanged.connect(self._on_fs_file_changed)
         self._fs_refresh_timer = QTimer(self)
         self._fs_refresh_timer.setSingleShot(True)
-        self._fs_refresh_timer.setInterval(500)
+        self._fs_refresh_timer.setInterval(FS_REFRESH_DEBOUNCE_MS)
         self._fs_refresh_timer.timeout.connect(self._on_fs_refresh_timeout)
         self._pending_fs_changes = set()
+        self._pending_file_changes = set()
         self._is_first_launch = is_first_launch()
         self._has_searched = False
         self._fs_paths_ready.connect(self._apply_fs_watcher_paths)
+        self._startup_sync_done.connect(self._on_startup_sync_done)
         self._init_ui()
         self._connect_signals()
         self._check_index_on_startup()
 
     def _init_ui(self):
         self.setWindowTitle("FileFinder - 本地文件搜索工具")
-        self.setMinimumSize(900, 600)
-        self.resize(1100, 720)
+        self.setMinimumSize(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT)
+        self.resize(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT)
 
         icon = QIcon("icons/search-alt.svg")
         self.setWindowIcon(icon)
@@ -160,7 +168,7 @@ class MainWindow(QMainWindow):
         right_layout.addWidget(self._search_scope_panel)
 
         self.preview_panel = PreviewPanel()
-        self.preview_panel.setMinimumWidth(200)
+        self.preview_panel.setMinimumWidth(PREVIEW_PANEL_MIN_WIDTH)
         right_layout.addWidget(self.preview_panel, 1)
 
         right_panel.setLayout(right_layout)
@@ -355,7 +363,6 @@ class MainWindow(QMainWindow):
         self._search_scope_panel.scan_unscanned_requested.connect(self._on_scan_unscanned)
         self.search_bar.search_triggered.connect(self._on_search)
         self.search_bar.search_mode_changed.connect(self.filter_bar.set_search_mode)
-        self.search_bar.history_search_requested.connect(self._on_history_search)
         self.result_list.result_selected.connect(self._on_result_selected)
         self.result_list.status_info_requested.connect(self._update_status_info)
         self.filter_bar.filter_changed.connect(self._on_filter_changed)
@@ -425,6 +432,8 @@ class MainWindow(QMainWindow):
             self.status_left.setText("就绪 - 请点击[重新扫描]开始")
         else:
             self.status_left.setText(f"就绪 - 已索引 {count:,} 个文件")
+            # 启动后台增量同步，检测程序关闭期间的文件变化
+            self._startup_sync_async()
         self._hide_loading()
         self.search_bar.set_focus()
 
@@ -694,21 +703,6 @@ class MainWindow(QMainWindow):
         self._search_worker.file_searching.connect(self._on_file_searching)
         self._search_worker.start()
 
-        # 保存搜索历史
-        try:
-            from database.history_dao import add_history
-            add_history(
-                name_query=name_query if name_query else None,
-                content_query=content_query if content_query else None,
-                name_mode=self.search_bar.get_name_mode()
-            )
-        except Exception:
-            pass
-
-    def _on_history_search(self, name_query: str, content_query: str, name_mode: str):
-        """从历史记录触发的搜索"""
-        self._on_search(name_query, content_query)
-
     def _on_search_progress(self, processed: int, total: int):
         """处理搜索进度更新信号"""
         self.result_list.update_search_progress(processed, total)
@@ -819,7 +813,7 @@ class MainWindow(QMainWindow):
                     if ftype == category:
                         self._current_file_types.append(ext)
 
-        if self._all_results and len(self._all_results) > 200:
+        if self._all_results and len(self._all_results) > INITIAL_DISPLAY_LIMIT:
             self.result_list.show_search_progress("正在筛选...")
             if hasattr(self, '_filter_timer'):
                 self._filter_timer.stop()
@@ -827,7 +821,7 @@ class MainWindow(QMainWindow):
                 self._filter_timer = QTimer(self)
                 self._filter_timer.setSingleShot(True)
                 self._filter_timer.timeout.connect(self._apply_current_filter)
-            self._filter_timer.start(50)
+            self._filter_timer.start(FILTER_DEBOUNCE_MS)
         elif self._all_results:
             self._apply_current_filter()
 
@@ -871,6 +865,131 @@ class MainWindow(QMainWindow):
                 return True
         return False
 
+    def _startup_sync_async(self):
+        """在后台线程中执行启动时的增量同步。
+
+        检测程序关闭期间发生的文件变化（新增/删除/修改），
+        自动更新索引，无需用户手动重新扫描。
+        """
+        from concurrent.futures import ThreadPoolExecutor
+        from database.db_manager import DatabaseManager
+
+        search_dirs = self._search_scope_panel.get_search_dirs()
+        if not search_dirs:
+            return
+
+        self.status_left.setText("正在同步文件变更...")
+
+        def _do_startup_sync():
+            logger.info(f"启动增量同步，搜索目录: {search_dirs}")
+            db = DatabaseManager()
+            indexed_paths = db.get_all_indexed_paths()
+            actual_paths = set()
+            changed_files = set()
+            added_count = 0
+            deleted_count = 0
+            updated_count = 0
+
+            # 遍历所有搜索目录，收集实际存在的文件
+            for d in search_dirs:
+                if not os.path.isdir(d):
+                    continue
+                try:
+                    for root, dirs, files in os.walk(d):
+                        # 跳过排除目录
+                        dirs[:] = [sub for sub in dirs if sub not in get_exclude_dirs()]
+                        for name in files:
+                            full_path = os.path.join(root, name)
+                            actual_paths.add(full_path)
+                            try:
+                                stat = os.stat(full_path)
+                                _, ext = os.path.splitext(name)
+                                existing = db.get_file_entry(full_path)
+                                if existing is None:
+                                    # 新增的文件
+                                    db.add_file_entry(
+                                        path=full_path, name=name,
+                                        ext=ext.lower() if ext else "",
+                                        size=stat.st_size,
+                                        mtime=stat.st_mtime
+                                    )
+                                    added_count += 1
+                                    if stat.st_size <= CONTENT_MAX_FILE_SIZE_MB * 1024 * 1024:
+                                        changed_files.add(full_path)
+                                else:
+                                    # 检查文件是否被修改（大小或修改时间变化）
+                                    old_size = existing["size"] if isinstance(existing, dict) else existing[4]
+                                    old_mtime = existing["modified_time"] if isinstance(existing, dict) else existing[5]
+                                    if stat.st_size != old_size or stat.st_mtime != old_mtime:
+                                        db.update_file_entry(
+                                            old_path=full_path, new_name=name,
+                                            new_ext=ext.lower() if ext else "",
+                                            new_size=stat.st_size,
+                                            new_mtime=stat.st_mtime
+                                        )
+                                        updated_count += 1
+                                        if stat.st_size <= CONTENT_MAX_FILE_SIZE_MB * 1024 * 1024:
+                                            changed_files.add(full_path)
+                            except (PermissionError, OSError):
+                                continue
+                except Exception:
+                    continue
+
+            # 删除索引中存在但文件系统中不存在的条目
+            stale_paths = indexed_paths - actual_paths
+            for path in stale_paths:
+                try:
+                    db.delete_file_entry(path)
+                    deleted_count += 1
+                except Exception:
+                    continue
+
+            # 后台更新内容索引
+            if changed_files:
+                self._update_content_index_async(db, changed_files)
+
+            logger.info(f"启动同步完成: 新增 {added_count}, 删除 {deleted_count}, 更新 {updated_count}, 内容待更新 {len(changed_files)}")
+            return added_count, deleted_count, updated_count
+
+        def _on_sync_done(future):
+            try:
+                added, deleted, updated = future.result()
+                self._startup_sync_done.emit(added, deleted, updated)
+            except Exception as e:
+                logger.warning(f"启动同步失败: {e}")
+                self._startup_sync_done.emit(0, 0, 0)
+
+        executor = ThreadPoolExecutor(max_workers=BACKGROUND_TASK_WORKERS)
+        future = executor.submit(_do_startup_sync)
+        future.add_done_callback(_on_sync_done)
+
+    def _on_startup_sync_done(self, added: int, deleted: int, updated: int):
+        """启动同步完成后的 UI 更新（在主线程执行）。"""
+        from database.db_manager import DatabaseManager
+        db = DatabaseManager()
+        count = db.get_index_count()
+        self._search_scope_panel.update_scope_info(count)
+
+        parts = []
+        if added > 0:
+            parts.append(f"新增 {added}")
+        if deleted > 0:
+            parts.append(f"删除 {deleted}")
+        if updated > 0:
+            parts.append(f"更新 {updated}")
+
+        if parts:
+            self.status_left.setText(
+                f"同步完成 - {', '.join(parts)} 个文件变更，共索引 {count:,} 个文件"
+            )
+            if self._all_results:
+                self._refresh_current_search()
+        else:
+            self.status_left.setText(f"就绪 - 已索引 {count:,} 个文件")
+
+        # 同步完成后设置文件监控
+        self._update_fs_watcher_async()
+
     def _update_fs_watcher_async(self):
         from concurrent.futures import ThreadPoolExecutor
         search_dirs = self._search_scope_panel.get_search_dirs()
@@ -896,7 +1015,7 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 logger.warning(f"设置文件监控失败: {e}")
 
-        executor = ThreadPoolExecutor(max_workers=1)
+        executor = ThreadPoolExecutor(max_workers=BACKGROUND_TASK_WORKERS)
         future = executor.submit(_collect_watch_paths)
         future.add_done_callback(_on_paths_collected)
 
@@ -912,7 +1031,29 @@ class MainWindow(QMainWindow):
             logger.warning(f"应用文件监控路径失败: {e}")
 
     def _on_fs_directory_changed(self, path: str):
+        logger.info(f"检测到目录变更: {path}")
         self._pending_fs_changes.add(path)
+        self._fs_refresh_timer.start()
+
+    def _on_fs_file_changed(self, path: str):
+        """文件内容修改时触发，将文件所在目录加入待同步集合。
+
+        注意：某些编辑器保存时会先删除旧文件再创建新文件，导致 QFileSystemWatcher
+        不再监控该文件。需要重新添加监控。
+        """
+        logger.info(f"检测到文件变更: {path}")
+        # 如果文件仍然存在，重新添加监控（防止编辑器删除重建后丢失监控）
+        if os.path.isfile(path):
+            try:
+                self._fs_watcher.addPath(path)
+            except Exception:
+                pass
+
+        dir_path = os.path.dirname(path)
+        if dir_path:
+            self._pending_fs_changes.add(dir_path)
+        # 记录具体变更的文件，用于精准更新内容索引
+        self._pending_file_changes.add(path)
         self._fs_refresh_timer.start()
 
     def _on_fs_refresh_timeout(self):
@@ -922,18 +1063,30 @@ class MainWindow(QMainWindow):
         from database.db_manager import DatabaseManager
         db = DatabaseManager()
 
+        logger.info(f"开始同步 {len(self._pending_fs_changes)} 个目录变更")
+
+        # 收集需要更新内容索引的文件路径
+        changed_files = set(self._pending_file_changes)
+        self._pending_file_changes.clear()
+
         for dir_path in self._pending_fs_changes:
             try:
-                self._sync_directory(db, dir_path)
+                self._sync_directory(db, dir_path, changed_files)
             except Exception as e:
                 logger.debug(f"同步目录变更失败: {dir_path}, {e}")
 
         self._pending_fs_changes.clear()
 
+        logger.info(f"同步完成，{len(changed_files)} 个文件需要更新内容索引")
+
+        # 在后台线程中更新变更文件的内容索引
+        if changed_files:
+            self._update_content_index_async(db, changed_files)
+
         if self._all_results:
             self._refresh_current_search()
 
-    def _sync_directory(self, db, dir_path: str):
+    def _sync_directory(self, db, dir_path: str, changed_files: set = None):
         if not os.path.isdir(dir_path):
             try:
                 deleted = db.delete_entries_by_prefix(dir_path)
@@ -945,6 +1098,7 @@ class MainWindow(QMainWindow):
 
         try:
             current_files = set()
+            new_dirs = []
             for item in os.listdir(dir_path):
                 full_path = os.path.join(dir_path, item)
                 current_files.add(full_path)
@@ -959,21 +1113,33 @@ class MainWindow(QMainWindow):
                             size=stat.st_size if not is_dir else 0,
                             mtime=stat.st_mtime, is_dir=1 if is_dir else 0
                         )
-                        # 新增文件：同时更新内容索引
-                        if not is_dir and stat.st_size <= 10 * 1024 * 1024:
-                            self._update_content_index_for_file(db, full_path, item)
+                        # 新增文件：加入内容索引待更新集合
+                        if not is_dir and stat.st_size <= CONTENT_MAX_FILE_SIZE_MB * 1024 * 1024 and changed_files is not None:
+                            changed_files.add(full_path)
+                        # 新增子目录：记录下来，后续加入监控
+                        if is_dir:
+                            new_dirs.append(full_path)
                     else:
+                        # 检查文件是否真的发生了变化（大小或修改时间）
+                        old_size = existing["size"] if isinstance(existing, dict) else existing[4]
+                        old_mtime = existing["modified_time"] if isinstance(existing, dict) else existing[5]
+                        file_changed = (stat.st_size != old_size or int(stat.st_mtime) != int(old_mtime))
                         db.update_file_entry(
                             old_path=full_path, new_name=item,
                             new_ext=ext.lower() if ext else "",
                             new_size=stat.st_size if not is_dir else 0,
                             new_mtime=stat.st_mtime
                         )
-                        # 修改文件：更新内容索引
-                        if not is_dir and stat.st_size <= 10 * 1024 * 1024:
-                            self._update_content_index_for_file(db, full_path, item)
+                        # 只有文件确实变化时才更新内容索引
+                        if file_changed and not is_dir and stat.st_size <= CONTENT_MAX_FILE_SIZE_MB * 1024 * 1024 and changed_files is not None:
+                            changed_files.add(full_path)
+                            logger.debug(f"文件已修改: {full_path}")
                 except (PermissionError, OSError):
                     continue
+
+            # 将新增子目录加入 QFileSystemWatcher 监控
+            if new_dirs:
+                self._add_fs_watcher_paths(new_dirs)
 
             indexed_paths = db.get_paths_by_parent(dir_path)
             for ep in indexed_paths:
@@ -1019,7 +1185,59 @@ class MainWindow(QMainWindow):
 
             db.update_content_entry(file_path, file_name, content_text, content_tokenized)
         except Exception as e:
-            logger.debug(f"增量内容索引失败: {file_path}, {type(e).__name__}")
+            logger.warning(f"增量内容索引失败: {file_path}, {type(e).__name__}: {e}")
+
+    def _add_fs_watcher_paths(self, paths: list):
+        """将新路径及其子目录添加到 QFileSystemWatcher 监控列表。
+
+        Args:
+            paths: 需要添加监控的目录路径列表
+        """
+        all_paths = list(paths)
+        # 递归收集子目录
+        for p in paths:
+            if os.path.isdir(p):
+                try:
+                    for root, dirs, _ in os.walk(p):
+                        for d in dirs:
+                            all_paths.append(os.path.join(root, d))
+                except Exception:
+                    continue
+
+        for p in all_paths:
+            if os.path.isdir(p):
+                try:
+                    self._fs_watcher.addPath(p)
+                    logger.debug(f"新增监控目录: {p}")
+                except Exception:
+                    pass
+
+    def _update_content_index_async(self, db, file_paths: set):
+        """在后台线程中批量更新文件内容索引。
+
+        Args:
+            db: DatabaseManager 实例
+            file_paths: 需要更新内容索引的文件路径集合
+        """
+        from concurrent.futures import ThreadPoolExecutor
+
+        logger.info(f"后台更新 {len(file_paths)} 个文件的内容索引")
+
+        def _do_update():
+            updated = 0
+            for file_path in file_paths:
+                if not os.path.isfile(file_path):
+                    continue
+                try:
+                    file_name = os.path.basename(file_path)
+                    self._update_content_index_for_file(db, file_path, file_name)
+                    updated += 1
+                except Exception as e:
+                    logger.warning(f"后台内容索引更新失败: {file_path}, {type(e).__name__}: {e}")
+            logger.info(f"内容索引更新完成: {updated}/{len(file_paths)} 个文件")
+
+        executor = ThreadPoolExecutor(max_workers=BACKGROUND_TASK_WORKERS)
+        executor.submit(_do_update)
 
     def _refresh_current_search(self):
         name_query = self.search_bar.get_name_query()

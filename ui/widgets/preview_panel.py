@@ -18,8 +18,12 @@ from PySide6.QtGui import (QFont, QFontMetrics, QIcon, QPixmap, QColor,
 from PySide6.QtCore import Qt, QSize, QRectF, QTimer, QThread, Signal, Property, QPropertyAnimation, QEasingCurve, QByteArray
 
 from constants import (TEXT_EXTENSIONS, CODE_EXTENSIONS, IMAGE_EXTENSIONS,
-                       DOCUMENT_EXTENSIONS, ARCHIVE_EXTENSIONS, VIDEO_EXTENSIONS, AUDIO_EXTENSIONS)
-from ..style_constants import COLORS, FONT, RADIUS, BTN, FILE_ICON_MAP
+                       DOCUMENT_EXTENSIONS, ARCHIVE_EXTENSIONS, VIDEO_EXTENSIONS, AUDIO_EXTENSIONS,
+                       MAX_TEXT_PREVIEW_SIZE_MB, MAX_PREVIEW_LINES, MAX_DOC_PREVIEW_SIZE_MB,
+                       DEFAULT_PDF_PAGES, PDF_LOAD_MORE_PAGES, PDF_RENDER_DPI, MAX_DOC_CHARS,
+                       MAX_MEDIA_PREVIEW_SIZE_MB, FORCE_PREVIEW_MAX_SIZE_MB,
+                       BACKGROUND_TASK_WORKERS, PREVIEW_DELAY_MS)
+from ..style_constants import COLORS, FONT, RADIUS, SYNTAX_HL, BTN, FILE_ICON_MAP
 from ..style_manager import (scrollbar_style, label_caption_style, label_micro_style,
                              badge_style, button_small_primary, button_small_secondary)
 
@@ -27,12 +31,6 @@ logger = logging.getLogger(__name__)
 
 PREVIEWABLE_TEXT_EXTS = TEXT_EXTENSIONS | CODE_EXTENSIONS
 PREVIEWABLE_IMAGE_EXTS = IMAGE_EXTENSIONS
-MAX_TEXT_PREVIEW_SIZE_MB = 2
-MAX_PREVIEW_LINES = 500
-MAX_DOC_PREVIEW_SIZE_MB = 10
-DEFAULT_PDF_PAGES = 5
-MAX_DOC_CHARS = 50000
-MAX_MEDIA_PREVIEW_SIZE_MB = 200
 MAX_IMAGE_PREVIEW_PIXELS = 1920 * 1080
 MARKDOWN_EXTS = {'.md'}
 HTML_EXTS = {'.html', '.htm'}
@@ -49,29 +47,29 @@ class _MarkdownHighlighter(QSyntaxHighlighter):
 
     def highlightBlock(self, text):
         fmt_heading = QTextCharFormat()
-        fmt_heading.setForeground(QColor("#c678dd"))
+        fmt_heading.setForeground(QColor(SYNTAX_HL.KEYWORD))
         fmt_heading.setFontWeight(QFont.Weight.Bold)
 
         fmt_bold = QTextCharFormat()
-        fmt_bold.setForeground(QColor("#e5c07b"))
+        fmt_bold.setForeground(QColor(SYNTAX_HL.BUILTIN))
         fmt_bold.setFontWeight(QFont.Weight.Bold)
 
         fmt_italic = QTextCharFormat()
-        fmt_italic.setForeground(QColor("#e5c07b"))
+        fmt_italic.setForeground(QColor(SYNTAX_HL.BUILTIN))
         fmt_italic.setFontItalic(True)
 
         fmt_code = QTextCharFormat()
-        fmt_code.setForeground(QColor("#98c379"))
+        fmt_code.setForeground(QColor(SYNTAX_HL.STRING))
         fmt_code.setBackground(QColor(COLORS.BG_TERTIARY))
 
         fmt_link = QTextCharFormat()
-        fmt_link.setForeground(QColor("#61afef"))
+        fmt_link.setForeground(QColor(SYNTAX_HL.LINK))
 
         fmt_list = QTextCharFormat()
-        fmt_list.setForeground(QColor("#d19a66"))
+        fmt_list.setForeground(QColor(SYNTAX_HL.NUMBER))
 
         fmt_hr = QTextCharFormat()
-        fmt_hr.setForeground(QColor("#5c6370"))
+        fmt_hr.setForeground(QColor(SYNTAX_HL.COMMENT))
 
         stripped = text.lstrip()
         if stripped.startswith('#'):
@@ -154,24 +152,24 @@ class _PythonHighlighter(QSyntaxHighlighter):
 
     def highlightBlock(self, text):
         fmt_keyword = QTextCharFormat()
-        fmt_keyword.setForeground(QColor("#c678dd"))
+        fmt_keyword.setForeground(QColor(SYNTAX_HL.KEYWORD))
         fmt_keyword.setFontWeight(QFont.Weight.Bold)
 
         fmt_builtin = QTextCharFormat()
-        fmt_builtin.setForeground(QColor("#e5c07b"))
+        fmt_builtin.setForeground(QColor(SYNTAX_HL.BUILTIN))
 
         fmt_string = QTextCharFormat()
-        fmt_string.setForeground(QColor("#98c379"))
+        fmt_string.setForeground(QColor(SYNTAX_HL.STRING))
 
         fmt_comment = QTextCharFormat()
-        fmt_comment.setForeground(QColor("#5c6370"))
+        fmt_comment.setForeground(QColor(SYNTAX_HL.COMMENT))
         fmt_comment.setFontItalic(True)
 
         fmt_number = QTextCharFormat()
-        fmt_number.setForeground(QColor("#d19a66"))
+        fmt_number.setForeground(QColor(SYNTAX_HL.NUMBER))
 
         fmt_decorator = QTextCharFormat()
-        fmt_decorator.setForeground(QColor("#e5c07b"))
+        fmt_decorator.setForeground(QColor(SYNTAX_HL.BUILTIN))
         fmt_decorator.setFontItalic(True)
 
         i = 0
@@ -234,15 +232,15 @@ class _JSHighlighter(QSyntaxHighlighter):
 
     def highlightBlock(self, text):
         fmt_keyword = QTextCharFormat()
-        fmt_keyword.setForeground(QColor("#c678dd"))
+        fmt_keyword.setForeground(QColor(SYNTAX_HL.KEYWORD))
         fmt_keyword.setFontWeight(QFont.Weight.Bold)
         fmt_string = QTextCharFormat()
-        fmt_string.setForeground(QColor("#98c379"))
+        fmt_string.setForeground(QColor(SYNTAX_HL.STRING))
         fmt_comment = QTextCharFormat()
-        fmt_comment.setForeground(QColor("#5c6370"))
+        fmt_comment.setForeground(QColor(SYNTAX_HL.COMMENT))
         fmt_comment.setFontItalic(True)
         fmt_number = QTextCharFormat()
-        fmt_number.setForeground(QColor("#d19a66"))
+        fmt_number.setForeground(QColor(SYNTAX_HL.NUMBER))
 
         i = 0
         while i < len(text):
@@ -271,7 +269,7 @@ class _JSHighlighter(QSyntaxHighlighter):
                     self.setFormat(i, j - i, fmt_keyword)
                 elif word in self.BUILTINS:
                     fmt_b = QTextCharFormat()
-                    fmt_b.setForeground(QColor("#e5c07b"))
+                    fmt_b.setForeground(QColor(SYNTAX_HL.BUILTIN))
                     self.setFormat(i, j - i, fmt_b)
                 i = j
             elif text[i].isdigit():
@@ -391,15 +389,15 @@ class _GenericCodeHighlighter(QSyntaxHighlighter):
         if not keywords:
             return
         fmt_keyword = QTextCharFormat()
-        fmt_keyword.setForeground(QColor("#c678dd"))
+        fmt_keyword.setForeground(QColor(SYNTAX_HL.KEYWORD))
         fmt_keyword.setFontWeight(QFont.Weight.Bold)
         fmt_string = QTextCharFormat()
-        fmt_string.setForeground(QColor("#98c379"))
+        fmt_string.setForeground(QColor(SYNTAX_HL.STRING))
         fmt_comment = QTextCharFormat()
-        fmt_comment.setForeground(QColor("#5c6370"))
+        fmt_comment.setForeground(QColor(SYNTAX_HL.COMMENT))
         fmt_comment.setFontItalic(True)
         fmt_number = QTextCharFormat()
-        fmt_number.setForeground(QColor("#d19a66"))
+        fmt_number.setForeground(QColor(SYNTAX_HL.NUMBER))
 
         i = 0
         while i < len(text):
@@ -463,21 +461,21 @@ class _JSONHighlighter(QSyntaxHighlighter):
 
     def highlightBlock(self, text):
         fmt_key = QTextCharFormat()
-        fmt_key.setForeground(QColor("#e5c07b"))
+        fmt_key.setForeground(QColor(SYNTAX_HL.BUILTIN))
         fmt_key.setFontWeight(QFont.Weight.Bold)
 
         fmt_string = QTextCharFormat()
-        fmt_string.setForeground(QColor("#98c379"))
+        fmt_string.setForeground(QColor(SYNTAX_HL.STRING))
 
         fmt_number = QTextCharFormat()
-        fmt_number.setForeground(QColor("#d19a66"))
+        fmt_number.setForeground(QColor(SYNTAX_HL.NUMBER))
 
         fmt_bool = QTextCharFormat()
-        fmt_bool.setForeground(QColor("#c678dd"))
+        fmt_bool.setForeground(QColor(SYNTAX_HL.KEYWORD))
         fmt_bool.setFontWeight(QFont.Weight.Bold)
 
         fmt_null = QTextCharFormat()
-        fmt_null.setForeground(QColor("#c678dd"))
+        fmt_null.setForeground(QColor(SYNTAX_HL.KEYWORD))
         fmt_null.setFontItalic(True)
 
         i = 0
@@ -1113,7 +1111,7 @@ class PreviewPanel(QWidget):
         self._excel_render_worker = None
         self._preview_timer = QTimer(self)
         self._preview_timer.setSingleShot(True)
-        self._preview_timer.setInterval(150)
+        self._preview_timer.setInterval(PREVIEW_DELAY_MS)
         self._preview_timer.timeout.connect(self._do_delayed_preview)
         self._pending_file_item = None
         self._pending_force = False
@@ -1289,7 +1287,7 @@ class PreviewPanel(QWidget):
                 border: 1px solid {COLORS.BORDER_DEFAULT};
                 border-radius: {_cir}px;
                 color: {COLORS.TEXT_SECONDARY};
-                font-family: "Cascadia Code", "Consolas", "Courier New", monospace;
+                font-family: {FONT.CODE_FAMILY};
                 font-size: {FONT.MICRO_PT}px;
                 selection-background-color: {COLORS.BRAND_LIGHT_BG};
                 selection-color: {COLORS.TEXT_PRIMARY};
@@ -1592,7 +1590,7 @@ class PreviewPanel(QWidget):
                 border: 1px solid {COLORS.BORDER_DEFAULT};
                 border-radius: {_cir}px;
                 color: {COLORS.TEXT_TERTIARY};
-                font-family: "Cascadia Code", "Consolas", "Courier New", monospace;
+                font-family: {FONT.CODE_FAMILY};
                 font-size: {FONT.MICRO_PT - 1}px;
             }}
         """)
@@ -1628,7 +1626,7 @@ class PreviewPanel(QWidget):
         self._media_cover_label.setStyleSheet(f"""
             border: 1px solid {COLORS.BORDER_DEFAULT};
             border-radius: {RADIUS.MEDIUM}px;
-            background-color: #1a1a2e;
+            background-color: {COLORS.MEDIA_COVER_BG};
         """)
         self._media_cover_label.setFixedSize(280, 200)
         self._media_cover_label.setScaledContents(False)
@@ -1824,7 +1822,7 @@ class PreviewPanel(QWidget):
                 border: 1px solid {COLORS.BORDER_DEFAULT};
                 border-radius: {_cir}px;
                 color: {COLORS.TEXT_SECONDARY};
-                font-family: "Microsoft YaHei", sans-serif;
+                font-family: {FONT.FAMILY};
                 font-size: {FONT.CAPTION_PT}px;
             }}
         """)
@@ -2040,7 +2038,7 @@ class PreviewPanel(QWidget):
             return
 
         from utils.encoding import read_text_file
-        max_mb = MAX_TEXT_PREVIEW_SIZE_MB if not force else 50
+        max_mb = MAX_TEXT_PREVIEW_SIZE_MB if not force else FORCE_PREVIEW_MAX_SIZE_MB
         content = read_text_file(file_item.path, max_size_mb=max_mb)
         if content is None:
             self._show_unsupported(file_item, "无法读取文件内容")
@@ -2179,7 +2177,7 @@ class PreviewPanel(QWidget):
             return
 
         from utils.encoding import read_text_file
-        max_mb = MAX_TEXT_PREVIEW_SIZE_MB if not force else 50
+        max_mb = MAX_TEXT_PREVIEW_SIZE_MB if not force else FORCE_PREVIEW_MAX_SIZE_MB
         content = read_text_file(file_item.path, max_size_mb=max_mb)
         if content is None:
             self._show_unsupported(file_item, "无法读取文件内容")
@@ -2241,12 +2239,12 @@ class PreviewPanel(QWidget):
                     html = re.sub(r'src="([^"]*)"', _replace_img_src, html)
             styled_html = f"""
             <style>
-                body {{ font-family: "Microsoft YaHei", sans-serif; color: {COLORS.TEXT_SECONDARY};
+                body {{ font-family: {FONT.FAMILY}; color: {COLORS.TEXT_SECONDARY};
                        font-size: {FONT.CAPTION_PT}px; line-height: 1.6; }}
                 h1, h2, h3, h4, h5, h6 {{ color: {COLORS.TEXT_PRIMARY}; margin-top: 12px; margin-bottom: 6px; }}
                 h1 {{ font-size: {FONT.DISPLAY_PT}px; }} h2 {{ font-size: {FONT.TITLE_PT}px; }}
                 code {{ background-color: {COLORS.BG_TERTIARY}; padding: 2px 6px; border-radius: 3px;
-                        font-family: "Cascadia Code", "Consolas", monospace; font-size: {FONT.MICRO_PT}px; }}
+                        font-family: {FONT.CODE_FAMILY}; font-size: {FONT.MICRO_PT}px; }}
                 pre {{ background-color: {COLORS.BG_TERTIARY}; padding: 12px; border-radius: 6px;
                        overflow-x: auto; }}
                 pre code {{ background: transparent; padding: 0; }}
@@ -2448,10 +2446,10 @@ class PreviewPanel(QWidget):
         self._content_stack.setCurrentWidget(self._loading_preview)
 
         # 以 150 DPI 渲染（足够清晰，缩放时用 Qt 平滑缩放）
-        self._start_pdf_render(file_item.path, 0, DEFAULT_PDF_PAGES, 150)
+        self._start_pdf_render(file_item.path, 0, DEFAULT_PDF_PAGES, PDF_RENDER_DPI)
         # 搜索高亮将在渲染完成后应用
 
-    def _start_pdf_render(self, file_path, start_page, count, dpi=150):
+    def _start_pdf_render(self, file_path, start_page, count, dpi=PDF_RENDER_DPI):
         if self._pdf_render_worker and self._pdf_render_worker.isRunning():
             self._pdf_render_worker.cancel()
             self._pdf_render_worker.wait(2000)
@@ -2522,7 +2520,7 @@ class PreviewPanel(QWidget):
         img_label.setObjectName("pdfPageImg")
         img_label.setPixmap(scaled)
         img_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        img_label.setStyleSheet(f"border:1px solid {COLORS.BORDER_DEFAULT}; border-radius:{RADIUS.SMALL}px; background:white;")
+        img_label.setStyleSheet(f"border:1px solid {COLORS.BORDER_DEFAULT}; border-radius:{RADIUS.SMALL}px; background:{COLORS.BG_PRIMARY};")
 
         page_num = QLabel(f"第 {page_idx + 1} 页")
         page_num.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -2569,7 +2567,7 @@ class PreviewPanel(QWidget):
             return
         self._pdf_load_more_btn.setText("正在加载...")
         self._pdf_load_more_btn.setEnabled(False)
-        self._start_pdf_render(self._current_file_item.path, self._pdf_pages_loaded, 10, 150)
+        self._start_pdf_render(self._current_file_item.path, self._pdf_pages_loaded, PDF_LOAD_MORE_PAGES, PDF_RENDER_DPI)
 
     def _on_pdf_scroll_wheel(self, event):
         """PDF 滚轮事件：Ctrl+滚轮缩放，普通滚轮滚动"""
@@ -3037,7 +3035,7 @@ class PreviewPanel(QWidget):
                 self._media_cover_label.setPixmap(scaled)
                 self._media_cover_label.setVisible(True)
 
-        executor = ThreadPoolExecutor(max_workers=1)
+        executor = ThreadPoolExecutor(max_workers=BACKGROUND_TASK_WORKERS)
         future = executor.submit(_fetch_info)
         future.add_done_callback(lambda f: QTimer.singleShot(0, lambda: _on_info_ready(f)))
 
@@ -3348,7 +3346,7 @@ class PreviewPanel(QWidget):
             return
 
         from utils.encoding import read_text_file
-        max_mb = MAX_TEXT_PREVIEW_SIZE_MB if not force else 50
+        max_mb = MAX_TEXT_PREVIEW_SIZE_MB if not force else FORCE_PREVIEW_MAX_SIZE_MB
         content = read_text_file(file_item.path, max_size_mb=max_mb)
         if content is None:
             self._show_unsupported(file_item, "无法读取文件内容")
@@ -3411,7 +3409,7 @@ class PreviewPanel(QWidget):
 
             styled_html = f"""
             <style>
-                body {{ font-family: "Microsoft YaHei", sans-serif; color: {COLORS.TEXT_SECONDARY};
+                body {{ font-family: {FONT.FAMILY}; color: {COLORS.TEXT_SECONDARY};
                        font-size: {FONT.CAPTION_PT}px; line-height: 1.6;
                        margin: 0; padding: 0; }}
                 img {{ max-width: 100%; }}
@@ -4017,7 +4015,7 @@ class PreviewPanel(QWidget):
 
         # 确保该页已加载
         if page_idx >= self._pdf_pages_loaded:
-            self._start_pdf_render(self._current_file_item.path, 0, page_idx + 1, 150)
+            self._start_pdf_render(self._current_file_item.path, 0, page_idx + 1, PDF_RENDER_DPI)
 
         # 重绘高亮（更新当前匹配标记）
         self._redraw_pdf_highlights()

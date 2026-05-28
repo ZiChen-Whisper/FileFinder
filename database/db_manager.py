@@ -4,6 +4,7 @@ import sqlite3
 import logging
 import threading
 from config import get_config_dir
+from constants import MAX_SEARCH_RESULTS, CONTENT_MAX_FILE_SIZE_MB, DB_CACHE_SIZE_KB, DB_MMAP_SIZE, DB_PAGE_SIZE, BATCH_SIZE
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +40,7 @@ class SearchCache:
     def search(self, pattern: str, case_sensitive: bool = False,
                file_types: list = None, exclude_file_types: list = None,
                size_min: int = None, size_max: int = None,
-               max_results: int = 1000) -> list:
+               max_results: int = MAX_SEARCH_RESULTS) -> list:
         with self._lock:
             if not self._loaded:
                 return []
@@ -120,10 +121,10 @@ class DatabaseManager:
         try:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA synchronous=NORMAL")
-            conn.execute("PRAGMA cache_size=-16000")
-            conn.execute("PRAGMA mmap_size=67108864")
+            conn.execute(f"PRAGMA cache_size=-{DB_CACHE_SIZE_KB}")
+            conn.execute(f"PRAGMA mmap_size={DB_MMAP_SIZE}")
             conn.execute("PRAGMA temp_store=MEMORY")
-            conn.execute("PRAGMA page_size=4096")
+            conn.execute(f"PRAGMA page_size={DB_PAGE_SIZE}")
         except sqlite3.OperationalError:
             pass
         return conn
@@ -168,16 +169,11 @@ class DatabaseManager:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     name_query TEXT,
                     content_query TEXT,
-                    name_mode TEXT DEFAULT 'fuzzy',
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     result_count INTEGER DEFAULT 0
                 )
             ''')
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_history_created ON search_history(created_at DESC)")
-            try:
-                cursor.execute("ALTER TABLE search_history ADD COLUMN name_mode TEXT DEFAULT 'fuzzy'")
-            except sqlite3.OperationalError:
-                pass
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS settings (
                     key TEXT PRIMARY KEY,
@@ -245,6 +241,16 @@ class DatabaseManager:
             cursor = conn.cursor()
             cursor.execute("SELECT COUNT(*) FROM file_index_cache")
             return cursor.fetchone()[0]
+        finally:
+            conn.close()
+
+    def get_all_indexed_paths(self) -> set:
+        """获取所有已索引的文件路径集合（用于启动时增量同步）。"""
+        conn = self._get_conn()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT path FROM file_index_cache")
+            return {row["path"] for row in cursor.fetchall()}
         finally:
             conn.close()
 
@@ -394,7 +400,7 @@ class DatabaseManager:
     def search_files(self, pattern: str, case_sensitive: bool = False,
                      file_types: list = None, exclude_file_types: list = None,
                      size_min: int = None,
-                     size_max: int = None, max_results: int = 1000) -> list:
+                     size_max: int = None, max_results: int = MAX_SEARCH_RESULTS) -> list:
         if not self._search_cache.is_loaded():
             self._search_cache.load(self._db_path)
 
@@ -438,8 +444,8 @@ class DatabaseManager:
             elif new_name is not None:
                 name_stem = os.path.splitext(new_name)[0]
                 cursor.execute(
-                    "UPDATE file_index_cache SET name = ?, name_stem = ? WHERE path = ?",
-                    (new_name, name_stem, old_path)
+                    "UPDATE file_index_cache SET name = ?, name_stem = ?, extension = ?, size = ?, modified_time = ? WHERE path = ?",
+                    (new_name, name_stem, new_ext, new_size, new_mtime, old_path)
                 )
             conn.commit()
         finally:
@@ -659,7 +665,7 @@ class DatabaseManager:
         finally:
             conn.close()
 
-    def search_content(self, query_tokenized: str, max_results: int = 1000) -> list:
+    def search_content(self, query_tokenized: str, max_results: int = MAX_SEARCH_RESULTS) -> list:
         """使用 FTS5 全文搜索，返回匹配的文件路径列表 + BM25 评分。
 
         Args:
@@ -720,7 +726,7 @@ class DatabaseManager:
         try:
             cursor = conn.cursor()
             # 查询非目录、大小 <= 10MB 的文件
-            max_size = 10 * 1024 * 1024
+            max_size = CONTENT_MAX_FILE_SIZE_MB * 1024 * 1024
             if path_prefix:
                 norm_prefix = os.path.normpath(path_prefix)
                 escaped_prefix = norm_prefix.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')

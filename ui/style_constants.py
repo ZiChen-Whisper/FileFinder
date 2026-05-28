@@ -114,6 +114,10 @@ class ColorTokens:
     # PDF 搜索当前匹配高亮覆盖色（半透明）- 当前匹配
     SEARCH_PDF_HIGHLIGHT_CURRENT: str = "rgba(255, 215, 0, 220)"
 
+    # --- 媒体封面背景色 ---
+    # 媒体封面占位背景：深色，用于音频/视频封面区域
+    MEDIA_COVER_BG: str = "#1a1a2e"
+
     # --- 阴影与遮罩 ---
     # 常规阴影色：用于弹窗轻微阴影
     SHADOW_COLOR: str = "rgba(0, 0, 0, 0.08)"
@@ -147,10 +151,20 @@ class FontTokens:
     CAPTION_PT: int = 12
     # 微型字号（11pt）：用于标签按钮、徽章、目录路径标签
     MICRO_PT: int = 11
+    # 展示超大字号（48pt）：用于扫描进度大百分比数字
+    DISPLAY_XL_PT: int = 48
+    # 图标字号（10pt）：用于小图标内文字（如 "?"、"!"）
+    ICON_PT: int = 10
+    # 大图标字号（24pt）：用于消息框图标内文字
+    ICON_LARGE_PT: int = 24
 
     # 全局字体族，按优先级降序排列：
     #   Microsoft YaHei（Windows 中文）> PingFang SC（macOS 中文）> Segoe UI（Windows 英文）> sans-serif
     FAMILY: str = '"Microsoft YaHei", "PingFang SC", "Segoe UI", sans-serif'
+
+    # 代码字体族，用于代码预览和语法高亮：
+    #   Cascadia Code > Consolas > Courier New > monospace
+    CODE_FAMILY: str = '"Cascadia Code", "Consolas", "Courier New", monospace'
 
     # 字重常量，用于 QSS font-weight 属性
     # 正常字重（400）：用于正文、描述文字
@@ -394,3 +408,30 @@ FILE_ICON_MAP = {
     # --- 其他 ---
     '.epub': 'doctype/图书.svg', '.xmind': 'doctype/思维导图.svg',
 }
+
+
+# ============================================================================
+# 语法高亮令牌（Syntax Highlight Tokens）
+# ============================================================================
+# 代码预览中语法高亮的颜色系统，基于 One Dark 主题。
+# 修改高亮配色时，只需修改本类中的对应值。
+# ============================================================================
+
+@dataclass(frozen=True)
+class SyntaxHighlightTokens:
+    # 关键字色（紫色）：用于 Python/JS/JSON 关键字、Markdown 标题
+    KEYWORD: str = "#c678dd"
+    # 内建色（黄色）：用于内建函数/类型、装饰器、JSON 键名、Markdown 粗体/斜体
+    BUILTIN: str = "#e5c07b"
+    # 字符串色（绿色）：用于字符串字面量、Markdown 代码
+    STRING: str = "#98c379"
+    # 注释色（灰色）：用于注释、Markdown 分隔线
+    COMMENT: str = "#5c6370"
+    # 数字色（橙色）：用于数字字面量、Markdown 列表标记
+    NUMBER: str = "#d19a66"
+    # 链接色（蓝色）：用于 Markdown 链接
+    LINK: str = "#61afef"
+
+
+# 全局语法高亮令牌单例
+SYNTAX_HL = SyntaxHighlightTokens()

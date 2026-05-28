@@ -58,7 +58,7 @@ class SettingsDialog(ModernDialogBase):
             title_label = QLabel("偏好设置功能开发中")
             title_label.setStyleSheet(f"""
                 font-size: {FONT.TITLE_PT}px;
-                font-weight: bold;
+                font-weight: {BTN.FONT_WEIGHT};
                 color: {COLORS.TEXT_PRIMARY};
                 border: none;
                 background: transparent;
@@ -75,7 +75,7 @@ class SettingsDialog(ModernDialogBase):
                 color: {COLORS.TEXT_TERTIARY};
                 border: none;
                 background: transparent;
-                line-height: 1.6;
+                line-height: {DIALOG.BODY_LINE_HEIGHT};
             """)
             desc_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             desc_label.setWordWrap(True)
@@ -87,7 +87,7 @@ class SettingsDialog(ModernDialogBase):
             close_btn = QPushButton("知道了")
             close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             close_btn.setStyleSheet(button_secondary(
-                "padding: 8px 28px; border-radius: 10px; min-width: 80px;"
+                f"padding: {BTN.PADDING_V} {BTN.PADDING_H_WIDE}; border-radius: {BTN.BORDER_RADIUS}px; min-width: {BTN.MIN_WIDTH};"
             ))
             close_btn.clicked.connect(self.accept)
 
