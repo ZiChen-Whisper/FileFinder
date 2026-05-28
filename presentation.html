@@ -1,0 +1,1650 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FileFinder - 项目验收展示</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700;900&display=swap');
+
+        :root {
+            --brand: #4f46e5;
+            --brand-light: #818cf8;
+            --brand-dark: #3730a3;
+            --accent: #06b6d4;
+            --accent-light: #22d3ee;
+            --surface: #0f172a;
+            --surface-2: #1e293b;
+            --surface-3: #334155;
+            --text: #f1f5f9;
+            --text-dim: #94a3b8;
+            --text-dimmer: #64748b;
+            --success: #22c55e;
+            --warning: #f59e0b;
+            --error: #ef4444;
+            --gradient-1: linear-gradient(135deg, #4f46e5 0%, #06b6d4 100%);
+            --gradient-2: linear-gradient(135deg, #7c3aed 0%, #2563eb 100%);
+            --gradient-3: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+            background: var(--surface);
+            color: var(--text);
+            overflow: hidden;
+            height: 100vh;
+            width: 100vw;
+            user-select: none;
+        }
+
+        .presentation {
+            width: 100vw;
+            height: 100vh;
+            position: relative;
+        }
+
+        .slide {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 60px 80px;
+            opacity: 0;
+            transform: translateX(60px);
+            transition: opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1),
+                        transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+            pointer-events: none;
+            will-change: transform, opacity;
+        }
+
+        .slide.active {
+            opacity: 1;
+            transform: translateX(0);
+            pointer-events: auto;
+        }
+
+        .slide.exit-left {
+            opacity: 0;
+            transform: translateX(-60px);
+        }
+
+        .slide-number {
+            position: fixed;
+            bottom: 30px;
+            right: 40px;
+            font-size: 14px;
+            color: var(--text-dimmer);
+            z-index: 100;
+            font-weight: 500;
+        }
+
+        .progress-bar {
+            position: fixed;
+            top: 0; left: 0;
+            height: 3px;
+            background: var(--gradient-1);
+            z-index: 100;
+            transition: width 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+            border-radius: 0 2px 2px 0;
+        }
+
+        .nav-hint {
+            position: fixed;
+            bottom: 30px;
+            left: 40px;
+            font-size: 12px;
+            color: var(--text-dimmer);
+            z-index: 100;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .nav-hint kbd {
+            background: var(--surface-3);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 4px;
+            padding: 2px 8px;
+            font-size: 11px;
+            font-family: inherit;
+        }
+
+        .tag {
+            display: inline-block;
+            padding: 4px 14px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 500;
+        }
+
+        .tag-brand { background: rgba(79,70,229,0.2); color: var(--brand-light); }
+        .tag-accent { background: rgba(6,182,212,0.2); color: var(--accent-light); }
+        .tag-success { background: rgba(34,197,94,0.2); color: var(--success); }
+        .tag-warning { background: rgba(245,158,11,0.2); color: var(--warning); }
+
+        .section-label {
+            font-size: 14px;
+            font-weight: 700;
+            letter-spacing: 3px;
+            text-transform: uppercase;
+            color: var(--brand-light);
+            margin-bottom: 16px;
+        }
+
+        .slide-title {
+            font-size: 48px;
+            font-weight: 900;
+            line-height: 1.2;
+            margin-bottom: 24px;
+            background: var(--gradient-1);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .slide-subtitle {
+            font-size: 20px;
+            color: var(--text-dim);
+            line-height: 1.7;
+            max-width: 700px;
+        }
+
+        .hero-slide {
+            text-align: center;
+            position: relative;
+        }
+
+        .hero-slide::before {
+            content: '';
+            position: absolute;
+            width: 600px; height: 600px;
+            background: radial-gradient(circle, rgba(79,70,229,0.15) 0%, transparent 70%);
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+        }
+
+        .hero-logo {
+            width: 100px; height: 100px;
+            border-radius: 24px;
+            margin-bottom: 32px;
+            position: relative;
+            z-index: 1;
+        }
+
+        .hero-title {
+            font-size: 72px;
+            font-weight: 900;
+            letter-spacing: -2px;
+            background: var(--gradient-1);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 16px;
+            position: relative;
+            z-index: 1;
+        }
+
+        .hero-sub {
+            font-size: 22px;
+            color: var(--text-dim);
+            margin-bottom: 40px;
+            position: relative;
+            z-index: 1;
+        }
+
+        .hero-tags {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+            flex-wrap: wrap;
+            position: relative;
+            z-index: 1;
+        }
+
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+            width: 100%;
+            max-width: 900px;
+            margin-top: 32px;
+        }
+
+        .feature-card {
+            background: var(--surface-2);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 16px;
+            padding: 28px 24px;
+            transition: all 0.3s ease;
+            opacity: 0;
+            transform: translateY(20px);
+        }
+
+        .slide.active .feature-card {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .feature-card:nth-child(1) { transition-delay: 0.1s; }
+        .feature-card:nth-child(2) { transition-delay: 0.2s; }
+        .feature-card:nth-child(3) { transition-delay: 0.3s; }
+        .feature-card:nth-child(4) { transition-delay: 0.4s; }
+        .feature-card:nth-child(5) { transition-delay: 0.5s; }
+        .feature-card:nth-child(6) { transition-delay: 0.6s; }
+
+        .feature-card:hover {
+            border-color: rgba(79,70,229,0.3);
+            transform: translateY(-4px);
+            box-shadow: 0 8px 32px rgba(79,70,229,0.15);
+        }
+
+        .feature-icon {
+            font-size: 32px;
+            margin-bottom: 12px;
+        }
+
+        .feature-name {
+            font-size: 16px;
+            font-weight: 700;
+            margin-bottom: 6px;
+        }
+
+        .feature-desc {
+            font-size: 13px;
+            color: var(--text-dim);
+            line-height: 1.6;
+        }
+
+        .arch-container {
+            width: 100%;
+            max-width: 960px;
+            margin-top: 24px;
+        }
+
+        .arch-layer {
+            background: var(--surface-2);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 14px;
+            padding: 20px 28px;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            opacity: 0;
+            transform: translateY(16px);
+            transition: all 0.4s ease;
+        }
+
+        .slide.active .arch-layer {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .arch-layer:nth-child(1) { transition-delay: 0.15s; }
+        .arch-layer:nth-child(2) { transition-delay: 0.3s; }
+        .arch-layer:nth-child(3) { transition-delay: 0.45s; }
+        .arch-layer:nth-child(4) { transition-delay: 0.6s; }
+        .arch-layer:nth-child(5) { transition-delay: 0.75s; }
+
+        .arch-layer-label {
+            min-width: 80px;
+            font-size: 13px;
+            font-weight: 700;
+            color: var(--brand-light);
+            letter-spacing: 1px;
+        }
+
+        .arch-layer-items {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .arch-item {
+            background: rgba(79,70,229,0.12);
+            border: 1px solid rgba(79,70,229,0.2);
+            border-radius: 8px;
+            padding: 6px 14px;
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text);
+            white-space: nowrap;
+        }
+
+        .arch-item.accent {
+            background: rgba(6,182,212,0.12);
+            border-color: rgba(6,182,212,0.2);
+        }
+
+        .arch-item.success {
+            background: rgba(34,197,94,0.12);
+            border-color: rgba(34,197,94,0.2);
+        }
+
+        .arch-arrow {
+            text-align: center;
+            color: var(--text-dimmer);
+            font-size: 18px;
+            margin: -4px 0;
+            opacity: 0;
+            transition: opacity 0.3s ease 0.9s;
+        }
+
+        .slide.active .arch-arrow { opacity: 1; }
+
+        .class-diagram {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 16px;
+            width: 100%;
+            max-width: 960px;
+            margin-top: 24px;
+        }
+
+        .class-box {
+            background: var(--surface-2);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 12px;
+            overflow: hidden;
+            opacity: 0;
+            transform: scale(0.95);
+            transition: all 0.4s ease;
+        }
+
+        .slide.active .class-box {
+            opacity: 1;
+            transform: scale(1);
+        }
+
+        .class-box:nth-child(1) { transition-delay: 0.1s; }
+        .class-box:nth-child(2) { transition-delay: 0.2s; }
+        .class-box:nth-child(3) { transition-delay: 0.3s; }
+        .class-box:nth-child(4) { transition-delay: 0.4s; }
+        .class-box:nth-child(5) { transition-delay: 0.5s; }
+        .class-box:nth-child(6) { transition-delay: 0.6s; }
+
+        .class-header {
+            padding: 12px 16px;
+            font-weight: 700;
+            font-size: 14px;
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+        }
+
+        .class-header.brand { background: rgba(79,70,229,0.15); color: var(--brand-light); }
+        .class-header.accent { background: rgba(6,182,212,0.15); color: var(--accent-light); }
+        .class-header.success { background: rgba(34,197,94,0.15); color: var(--success); }
+        .class-header.warning { background: rgba(245,158,11,0.15); color: var(--warning); }
+        .class-header.error { background: rgba(239,68,68,0.15); color: var(--error); }
+        .class-header.purple { background: rgba(168,85,247,0.15); color: #c084fc; }
+
+        .class-body {
+            padding: 10px 16px;
+            font-size: 12px;
+            color: var(--text-dim);
+            line-height: 1.8;
+            font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+        }
+
+        .class-body .attr { color: var(--accent-light); }
+        .class-body .method { color: var(--success); }
+
+        .difficulty-section {
+            width: 100%;
+            max-width: 900px;
+            margin-top: 20px;
+        }
+
+        .difficulty-card {
+            background: var(--surface-2);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 14px;
+            padding: 24px 28px;
+            margin-bottom: 14px;
+            opacity: 0;
+            transform: translateX(-20px);
+            transition: all 0.5s ease;
+        }
+
+        .slide.active .difficulty-card {
+            opacity: 1;
+            transform: translateX(0);
+        }
+
+        .difficulty-card:nth-child(1) { transition-delay: 0.15s; }
+        .difficulty-card:nth-child(2) { transition-delay: 0.3s; }
+        .difficulty-card:nth-child(3) { transition-delay: 0.45s; }
+
+        .difficulty-title {
+            font-size: 18px;
+            font-weight: 700;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .difficulty-body {
+            font-size: 14px;
+            color: var(--text-dim);
+            line-height: 1.8;
+        }
+
+        .difficulty-body code {
+            background: rgba(79,70,229,0.15);
+            color: var(--brand-light);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+            font-size: 12px;
+        }
+
+        .score-table {
+            width: 100%;
+            max-width: 700px;
+            border-collapse: collapse;
+            margin-top: 16px;
+        }
+
+        .score-table th {
+            text-align: left;
+            padding: 10px 16px;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-dim);
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .score-table td {
+            padding: 10px 16px;
+            font-size: 14px;
+            border-bottom: 1px solid rgba(255,255,255,0.04);
+        }
+
+        .score-table tr:last-child td { border-bottom: none; }
+
+        .score-badge {
+            display: inline-block;
+            min-width: 36px;
+            text-align: center;
+            padding: 3px 10px;
+            border-radius: 6px;
+            font-weight: 700;
+            font-size: 13px;
+        }
+
+        .score-100 { background: rgba(34,197,94,0.2); color: var(--success); }
+        .score-80 { background: rgba(6,182,212,0.2); color: var(--accent-light); }
+        .score-60 { background: rgba(79,70,229,0.2); color: var(--brand-light); }
+        .score-40 { background: rgba(245,158,11,0.2); color: var(--warning); }
+
+        .flow-container {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-top: 20px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .flow-step {
+            background: var(--surface-2);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 12px;
+            padding: 16px 22px;
+            text-align: center;
+            min-width: 140px;
+            opacity: 0;
+            transform: scale(0.9);
+            transition: all 0.4s ease;
+        }
+
+        .slide.active .flow-step {
+            opacity: 1;
+            transform: scale(1);
+        }
+
+        .flow-step:nth-child(1) { transition-delay: 0.1s; }
+        .flow-step:nth-child(3) { transition-delay: 0.2s; }
+        .flow-step:nth-child(5) { transition-delay: 0.3s; }
+        .flow-step:nth-child(7) { transition-delay: 0.4s; }
+        .flow-step:nth-child(9) { transition-delay: 0.5s; }
+
+        .flow-step-title {
+            font-size: 14px;
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+
+        .flow-step-desc {
+            font-size: 11px;
+            color: var(--text-dim);
+        }
+
+        .flow-arrow {
+            color: var(--brand-light);
+            font-size: 20px;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .slide.active .flow-arrow { opacity: 1; }
+
+        .demo-container {
+            text-align: center;
+            position: relative;
+        }
+
+        .demo-container::before {
+            content: '';
+            position: absolute;
+            width: 500px; height: 500px;
+            background: radial-gradient(circle, rgba(6,182,212,0.1) 0%, transparent 70%);
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+        }
+
+        .demo-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 12px;
+            background: var(--gradient-1);
+            color: white;
+            text-decoration: none;
+            padding: 18px 40px;
+            border-radius: 14px;
+            font-size: 20px;
+            font-weight: 700;
+            margin-top: 32px;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 24px rgba(79,70,229,0.3);
+            position: relative;
+            z-index: 1;
+        }
+
+        .demo-link:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 40px rgba(79,70,229,0.4);
+        }
+
+        .demo-features {
+            display: flex;
+            gap: 16px;
+            margin-top: 32px;
+            flex-wrap: wrap;
+            justify-content: center;
+            position: relative;
+            z-index: 1;
+        }
+
+        .demo-feature {
+            background: var(--surface-2);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 10px;
+            padding: 14px 20px;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            opacity: 0;
+            transform: translateY(10px);
+            transition: all 0.4s ease;
+        }
+
+        .slide.active .demo-feature {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .demo-feature:nth-child(1) { transition-delay: 0.2s; }
+        .demo-feature:nth-child(2) { transition-delay: 0.35s; }
+        .demo-feature:nth-child(3) { transition-delay: 0.5s; }
+        .demo-feature:nth-child(4) { transition-delay: 0.65s; }
+
+        .summary-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            width: 100%;
+            max-width: 800px;
+            margin-top: 24px;
+        }
+
+        .summary-card {
+            background: var(--surface-2);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 14px;
+            padding: 24px;
+            opacity: 0;
+            transform: translateY(16px);
+            transition: all 0.4s ease;
+        }
+
+        .slide.active .summary-card {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .summary-card:nth-child(1) { transition-delay: 0.1s; }
+        .summary-card:nth-child(2) { transition-delay: 0.2s; }
+        .summary-card:nth-child(3) { transition-delay: 0.3s; }
+        .summary-card:nth-child(4) { transition-delay: 0.4s; }
+
+        .summary-card-title {
+            font-size: 16px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .summary-card-body {
+            font-size: 13px;
+            color: var(--text-dim);
+            line-height: 1.7;
+        }
+
+        .thanks-slide {
+            text-align: center;
+        }
+
+        .thanks-slide::before {
+            content: '';
+            position: absolute;
+            width: 800px; height: 800px;
+            background: radial-gradient(circle, rgba(79,70,229,0.12) 0%, transparent 60%);
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+        }
+
+        .thanks-title {
+            font-size: 64px;
+            font-weight: 900;
+            background: var(--gradient-1);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 16px;
+            position: relative;
+            z-index: 1;
+        }
+
+        .thanks-sub {
+            font-size: 20px;
+            color: var(--text-dim);
+            margin-bottom: 40px;
+            position: relative;
+            z-index: 1;
+        }
+
+        .tech-stack {
+            display: flex;
+            gap: 14px;
+            justify-content: center;
+            flex-wrap: wrap;
+            position: relative;
+            z-index: 1;
+        }
+
+        .tech-badge {
+            background: var(--surface-2);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 10px;
+            padding: 10px 20px;
+            font-size: 14px;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .content-left {
+            width: 100%;
+            max-width: 900px;
+        }
+
+        .content-left .slide-title {
+            text-align: left;
+        }
+
+        .content-left .slide-subtitle {
+            text-align: left;
+        }
+
+        .pain-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 16px;
+            margin-top: 28px;
+            width: 100%;
+            max-width: 900px;
+        }
+
+        .pain-card {
+            background: var(--surface-2);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 14px;
+            padding: 24px;
+            text-align: center;
+            opacity: 0;
+            transform: translateY(16px);
+            transition: all 0.4s ease;
+        }
+
+        .slide.active .pain-card {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .pain-card:nth-child(1) { transition-delay: 0.1s; }
+        .pain-card:nth-child(2) { transition-delay: 0.25s; }
+        .pain-card:nth-child(3) { transition-delay: 0.4s; }
+
+        .pain-icon {
+            font-size: 36px;
+            margin-bottom: 12px;
+        }
+
+        .pain-title {
+            font-size: 15px;
+            font-weight: 700;
+            margin-bottom: 6px;
+            color: var(--error);
+        }
+
+        .pain-desc {
+            font-size: 12px;
+            color: var(--text-dim);
+            line-height: 1.6;
+        }
+
+        .solution-arrow {
+            text-align: center;
+            margin: 20px 0;
+            font-size: 28px;
+            color: var(--brand-light);
+            opacity: 0;
+            transition: opacity 0.4s ease 0.55s;
+        }
+
+        .slide.active .solution-arrow { opacity: 1; }
+
+        .solution-box {
+            background: var(--surface-2);
+            border: 1px solid rgba(79,70,229,0.2);
+            border-radius: 14px;
+            padding: 20px 28px;
+            width: 100%;
+            max-width: 900px;
+            opacity: 0;
+            transform: translateY(10px);
+            transition: all 0.5s ease 0.65s;
+        }
+
+        .slide.active .solution-box {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .solution-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: var(--success);
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .solution-body {
+            font-size: 14px;
+            color: var(--text-dim);
+            line-height: 1.8;
+        }
+
+        .perf-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 14px;
+            margin-top: 20px;
+            width: 100%;
+            max-width: 900px;
+        }
+
+        .perf-card {
+            background: var(--surface-2);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 12px;
+            padding: 18px;
+            text-align: center;
+            opacity: 0;
+            transform: translateY(12px);
+            transition: all 0.4s ease;
+        }
+
+        .slide.active .perf-card {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .perf-card:nth-child(1) { transition-delay: 0.1s; }
+        .perf-card:nth-child(2) { transition-delay: 0.2s; }
+        .perf-card:nth-child(3) { transition-delay: 0.3s; }
+        .perf-card:nth-child(4) { transition-delay: 0.4s; }
+
+        .perf-value {
+            font-size: 28px;
+            font-weight: 900;
+            background: var(--gradient-1);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .perf-label {
+            font-size: 12px;
+            color: var(--text-dim);
+            margin-top: 4px;
+        }
+
+        .search-flow {
+            width: 100%;
+            max-width: 900px;
+            margin-top: 20px;
+        }
+
+        .search-flow-row {
+            display: flex;
+            align-items: stretch;
+            gap: 12px;
+            margin-bottom: 10px;
+        }
+
+        .search-flow-main {
+            flex: 1;
+            background: var(--surface-2);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 12px;
+            padding: 16px 20px;
+            opacity: 0;
+            transform: translateX(-16px);
+            transition: all 0.4s ease;
+        }
+
+        .slide.active .search-flow-main {
+            opacity: 1;
+            transform: translateX(0);
+        }
+
+        .search-flow-main:nth-child(1) { transition-delay: 0.1s; }
+
+        .sf-title {
+            font-size: 14px;
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+
+        .sf-desc {
+            font-size: 12px;
+            color: var(--text-dim);
+            line-height: 1.6;
+        }
+
+        .sf-arrow-down {
+            text-align: center;
+            color: var(--brand-light);
+            font-size: 16px;
+            margin: 2px 0;
+        }
+
+        .two-col {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            width: 100%;
+            max-width: 900px;
+            margin-top: 16px;
+        }
+
+        .col-box {
+            background: var(--surface-2);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 14px;
+            padding: 22px;
+            opacity: 0;
+            transform: translateY(12px);
+            transition: all 0.4s ease;
+        }
+
+        .slide.active .col-box {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .col-box:nth-child(1) { transition-delay: 0.15s; }
+        .col-box:nth-child(2) { transition-delay: 0.3s; }
+
+        .col-title {
+            font-size: 16px;
+            font-weight: 700;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .col-body {
+            font-size: 13px;
+            color: var(--text-dim);
+            line-height: 1.8;
+        }
+
+        .col-body li {
+            margin-bottom: 4px;
+        }
+
+        .fts-flow {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            justify-content: center;
+            margin-top: 20px;
+            flex-wrap: wrap;
+        }
+
+        .fts-step {
+            background: var(--surface-2);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 10px;
+            padding: 12px 18px;
+            font-size: 13px;
+            font-weight: 500;
+            text-align: center;
+            opacity: 0;
+            transform: scale(0.9);
+            transition: all 0.3s ease;
+        }
+
+        .slide.active .fts-step {
+            opacity: 1;
+            transform: scale(1);
+        }
+
+        .fts-step:nth-child(1) { transition-delay: 0.1s; }
+        .fts-step:nth-child(3) { transition-delay: 0.25s; }
+        .fts-step:nth-child(5) { transition-delay: 0.4s; }
+        .fts-step:nth-child(7) { transition-delay: 0.55s; }
+
+        .fts-arrow {
+            color: var(--brand-light);
+            font-size: 16px;
+        }
+
+        .preview-grid {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 12px;
+            width: 100%;
+            max-width: 900px;
+            margin-top: 20px;
+        }
+
+        .preview-item {
+            background: var(--surface-2);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 10px;
+            padding: 14px;
+            text-align: center;
+            opacity: 0;
+            transform: translateY(10px);
+            transition: all 0.3s ease;
+        }
+
+        .slide.active .preview-item {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .preview-item:nth-child(1) { transition-delay: 0.05s; }
+        .preview-item:nth-child(2) { transition-delay: 0.1s; }
+        .preview-item:nth-child(3) { transition-delay: 0.15s; }
+        .preview-item:nth-child(4) { transition-delay: 0.2s; }
+        .preview-item:nth-child(5) { transition-delay: 0.25s; }
+        .preview-item:nth-child(6) { transition-delay: 0.3s; }
+        .preview-item:nth-child(7) { transition-delay: 0.35s; }
+        .preview-item:nth-child(8) { transition-delay: 0.4s; }
+        .preview-item:nth-child(9) { transition-delay: 0.45s; }
+        .preview-item:nth-child(10) { transition-delay: 0.5s; }
+
+        .preview-icon { font-size: 24px; margin-bottom: 6px; }
+        .preview-name { font-size: 12px; font-weight: 600; }
+        .preview-ext { font-size: 10px; color: var(--text-dimmer); }
+    </style>
+</head>
+<body>
+    <div class="presentation" id="presentation">
+        <div class="progress-bar" id="progressBar"></div>
+
+        <!-- Slide 1: Title -->
+        <div class="slide hero-slide active" data-index="0">
+            <img class="hero-logo" src="icons/FileFinder.png" alt="FileFinder">
+            <div class="hero-title">FileFinder</div>
+            <div class="hero-sub">轻量级本地文件搜索桌面工具</div>
+            <div class="hero-tags">
+                <span class="tag tag-brand">🔍 多模式搜索</span>
+                <span class="tag tag-accent">⚡ SQLite 索引</span>
+                <span class="tag tag-success">👁️ 内容预览</span>
+                <span class="tag tag-warning">📄 全文检索</span>
+            </div>
+        </div>
+
+        <!-- Slide 2: Background -->
+        <div class="slide" data-index="1">
+            <div class="content-left">
+                <div class="section-label">项目背景</div>
+                <div class="slide-title">为什么需要 FileFinder？</div>
+                <div class="slide-subtitle">Windows 自带搜索速度慢、功能单一，现有工具要么收费、要么臃肿，我们需要一个轻量、快速、功能完整的本地搜索方案。</div>
+            </div>
+            <div class="pain-grid">
+                <div class="pain-card">
+                    <div class="pain-icon">🐌</div>
+                    <div class="pain-title">Windows 搜索慢</div>
+                    <div class="pain-desc">系统自带搜索建立索引耗时，搜索响应经常数秒甚至数十秒，体验极差</div>
+                </div>
+                <div class="pain-card">
+                    <div class="pain-icon">💰</div>
+                    <div class="pain-title">专业工具收费</div>
+                    <div class="pain-desc">Listary、Everything 等优秀工具核心功能需付费，且不支持内容搜索</div>
+                </div>
+                <div class="pain-card">
+                    <div class="pain-icon">📦</div>
+                    <div class="pain-title">功能单一</div>
+                    <div class="pain-desc">多数工具只支持文件名搜索，无法搜索文件内容，缺少预览功能</div>
+                </div>
+            </div>
+            <div class="solution-arrow">▼</div>
+            <div class="solution-box">
+                <div class="solution-title">✅ FileFinder 的解决方案</div>
+                <div class="solution-body">
+                    基于 <strong>SQLite 持久化索引 + 内存缓存</strong>，一次扫描终生复用，文件名搜索毫秒级响应；<br>
+                    支持 <strong>4 种匹配模式</strong>（模糊/精确/通配符/正则）+ <strong>文件内容搜索</strong>（多线程并发 + FTS5 全文索引）；<br>
+                    内置 <strong>10+ 种格式预览</strong>，搜索即可预览，无需打开外部程序。
+                </div>
+            </div>
+        </div>
+
+        <!-- Slide 3: Features Overview -->
+        <div class="slide" data-index="2">
+            <div class="content-left">
+                <div class="section-label">功能概览</div>
+                <div class="slide-title">核心特性</div>
+                <div class="slide-subtitle">六大核心能力，覆盖本地文件搜索的全流程</div>
+            </div>
+            <div class="feature-grid">
+                <div class="feature-card">
+                    <div class="feature-icon">🔍</div>
+                    <div class="feature-name">多模式搜索</div>
+                    <div class="feature-desc">模糊/精确/通配符/正则四种匹配方式，相关度评分排序</div>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">📄</div>
+                    <div class="feature-name">内容搜索</div>
+                    <div class="feature-desc">多线程并发搜索文件内容，支持纯文本、PDF、Word、Excel、PPT</div>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">⚡</div>
+                    <div class="feature-name">极速索引</div>
+                    <div class="feature-desc">SQLite 持久化 + 内存缓存 + FTS5 全文索引，毫秒级响应</div>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">👁️</div>
+                    <div class="feature-name">内容预览</div>
+                    <div class="feature-desc">文本/代码/PDF/图片/Excel/Markdown/Word/HTML 等 10+ 格式</div>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🔄</div>
+                    <div class="feature-name">实时同步</div>
+                    <div class="feature-desc">QFileSystemWatcher 监控文件变化，索引自动增量更新</div>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🎯</div>
+                    <div class="feature-name">精准筛选</div>
+                    <div class="feature-desc">9 大文件分类 + 子分类 + 4 种排序方式 + 联合搜索</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Slide 4: Architecture -->
+        <div class="slide" data-index="3">
+            <div class="content-left">
+                <div class="section-label">详细设计</div>
+                <div class="slide-title">分层架构</div>
+                <div class="slide-subtitle">采用经典分层架构，各层职责清晰，通过接口解耦</div>
+            </div>
+            <div class="arch-container">
+                <div class="arch-layer">
+                    <div class="arch-layer-label">UI 层</div>
+                    <div class="arch-layer-items">
+                        <div class="arch-item">MainWindow</div>
+                        <div class="arch-item">SearchBar</div>
+                        <div class="arch-item">ResultList</div>
+                        <div class="arch-item">FilterBar</div>
+                        <div class="arch-item">PreviewPanel</div>
+                        <div class="arch-item">SettingsDialog</div>
+                    </div>
+                </div>
+                <div class="arch-arrow">▼</div>
+                <div class="arch-layer">
+                    <div class="arch-layer-label">Core 层</div>
+                    <div class="arch-layer-items">
+                        <div class="arch-item accent">SearchEngine</div>
+                        <div class="arch-item accent">NameSearcher</div>
+                        <div class="arch-item accent">ContentSearcher</div>
+                        <div class="arch-item accent">ParserRegistry</div>
+                        <div class="arch-item accent">ScanWorker</div>
+                    </div>
+                </div>
+                <div class="arch-arrow">▼</div>
+                <div class="arch-layer">
+                    <div class="arch-layer-label">Model 层</div>
+                    <div class="arch-layer-items">
+                        <div class="arch-item success">FileItem</div>
+                        <div class="arch-item success">SearchQuery</div>
+                        <div class="arch-item success">SearchResult</div>
+                        <div class="arch-item success">ContentMatch</div>
+                        <div class="arch-item success">SearchHistory</div>
+                    </div>
+                </div>
+                <div class="arch-arrow">▼</div>
+                <div class="arch-layer">
+                    <div class="arch-layer-label">Data 层</div>
+                    <div class="arch-layer-items">
+                        <div class="arch-item">DatabaseManager</div>
+                        <div class="arch-item">SearchCache</div>
+                        <div class="arch-item">HistoryDAO</div>
+                        <div class="arch-item">SettingsDAO</div>
+                        <div class="arch-item">Config</div>
+                    </div>
+                </div>
+                <div class="arch-arrow">▼</div>
+                <div class="arch-layer">
+                    <div class="arch-layer-label">Utils 层</div>
+                    <div class="arch-layer-items">
+                        <div class="arch-item">encoding.py</div>
+                        <div class="arch-item">path_helper.py</div>
+                        <div class="arch-item">thread_helper.py</div>
+                        <div class="arch-item">tokenizer.py</div>
+                        <div class="arch-item">flow_layout.py</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Slide 5: Class Structure -->
+        <div class="slide" data-index="4">
+            <div class="content-left">
+                <div class="section-label">详细设计</div>
+                <div class="slide-title">核心类结构</div>
+                <div class="slide-subtitle">6 个核心类，职责单一，通过信号槽和接口协作</div>
+            </div>
+            <div class="class-diagram">
+                <div class="class-box">
+                    <div class="class-header brand">SearchEngine</div>
+                    <div class="class-body">
+                        <div class="attr">- _content_searcher</div>
+                        <div class="attr">- _canceled: bool</div>
+                        <div class="method">+ search(query) → List</div>
+                        <div class="method">+ cancel()</div>
+                        <div class="method">+ has_index() → bool</div>
+                    </div>
+                </div>
+                <div class="class-box">
+                    <div class="class-header accent">NameSearcher</div>
+                    <div class="class-body">
+                        <div class="method">+ fuzzy_match()</div>
+                        <div class="method">+ wildcard_match()</div>
+                        <div class="method">+ regex_match()</div>
+                        <div class="method">+ search_by_name()</div>
+                        <div class="method">- _calculate_relevance()</div>
+                    </div>
+                </div>
+                <div class="class-box">
+                    <div class="class-header accent">ContentSearcher</div>
+                    <div class="class-body">
+                        <div class="attr">Signal: progress_updated</div>
+                        <div class="attr">Signal: result_found</div>
+                        <div class="method">+ search_by_index()</div>
+                        <div class="method">+ search_realtime()</div>
+                        <div class="method">- _search_pdf_file()</div>
+                    </div>
+                </div>
+                <div class="class-box">
+                    <div class="class-header success">DatabaseManager</div>
+                    <div class="class-body">
+                        <div class="attr">- _instance: Singleton</div>
+                        <div class="attr">- _search_cache: SearchCache</div>
+                        <div class="method">+ search_files()</div>
+                        <div class="method">+ insert_file_batch()</div>
+                        <div class="method">+ search_content() <em>FTS5</em></div>
+                    </div>
+                </div>
+                <div class="class-box">
+                    <div class="class-header warning">ParserRegistry</div>
+                    <div class="class-body">
+                        <div class="attr">- _parsers: List[FileParser]</div>
+                        <div class="method">+ parse(file_path)</div>
+                        <div class="method">+ can_parse(file_path)</div>
+                        <div class="method">+ get_supported_exts()</div>
+                    </div>
+                </div>
+                <div class="class-box">
+                    <div class="class-header purple">SearchQuery</div>
+                    <div class="class-body">
+                        <div class="attr">name_query / name_mode</div>
+                        <div class="attr">content_query / content_mode</div>
+                        <div class="attr">file_types / include_dirs</div>
+                        <div class="attr">size_min / size_max</div>
+                        <div class="method">+ has_name_query → bool</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Slide 6: Difficulty 1 - Search Engine -->
+        <div class="slide" data-index="5">
+            <div class="content-left">
+                <div class="section-label">技术难点</div>
+                <div class="slide-title">多模式搜索引擎</div>
+                <div class="slide-subtitle">如何在一个引擎中统一支持四种匹配模式，并保证搜索结果的精准排序？</div>
+            </div>
+            <div class="difficulty-section">
+                <div class="difficulty-card">
+                    <div class="difficulty-title">
+                        <span class="tag tag-brand">难点 1</span>
+                        四种匹配模式的统一调度
+                    </div>
+                    <div class="difficulty-body">
+                        通过 <code>SearchQuery.name_mode</code> 字段区分匹配模式，在 <code>NameSearcher</code> 中统一调度：<br>
+                        先用 <code>_extract_pre_filter_pattern()</code> 从通配符/正则中提取字面量，通过 SQL <code>LIKE</code> 预过滤缩小范围，<br>
+                        再在 Python 层用 <code>fnmatch</code> / <code>re.search</code> 精确匹配，避免全表扫描。
+                    </div>
+                </div>
+                <div class="difficulty-card">
+                    <div class="difficulty-title">
+                        <span class="tag tag-accent">难点 2</span>
+                        相关度评分算法
+                    </div>
+                    <div class="difficulty-body">
+                        设计四级评分体系，精确匹配 > 前缀匹配 > 词边界匹配 > 子串匹配，<br>
+                        同时加入模式长度权重，更长的匹配关键词获得更高分数：
+                    </div>
+                    <table class="score-table">
+                        <thead>
+                            <tr><th>匹配类型</th><th>分数</th><th>示例</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>精确匹配</td><td><span class="score-badge score-100">100+</span></td><td>搜索 <code>main.py</code>，文件名恰好为 main.py</td></tr>
+                            <tr><td>前缀匹配</td><td><span class="score-badge score-80">80+</span></td><td>搜索 <code>main</code>，文件名以 main 开头</td></tr>
+                            <tr><td>词边界匹配</td><td><span class="score-badge score-60">60+</span></td><td>搜索 <code>main</code>，匹配 my_main_file.py</td></tr>
+                            <tr><td>子串匹配</td><td><span class="score-badge score-40">40+</span></td><td>搜索 <code>main</code>，匹配 remain.py</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Slide 7: Difficulty 2 - Content Search -->
+        <div class="slide" data-index="6">
+            <div class="content-left">
+                <div class="section-label">技术难点</div>
+                <div class="slide-title">内容搜索与全文索引</div>
+                <div class="slide-subtitle">如何实现高效的文件内容搜索？双策略：FTS5 全文索引 + 实时扫描回退</div>
+            </div>
+            <div class="two-col">
+                <div class="col-box">
+                    <div class="col-title" style="color: var(--brand-light);">⚡ FTS5 索引搜索</div>
+                    <div class="col-body">
+                        <ul>
+                            <li>使用 SQLite FTS5 虚拟表构建全文索引</li>
+                            <li>扫描时 jieba 分词写入索引</li>
+                            <li>搜索时对查询文本分词后 MATCH</li>
+                            <li>BM25 算法排序，毫秒级响应</li>
+                            <li>从 <code>file_content_raw</code> 提取上下文行</li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="col-box">
+                    <div class="col-title" style="color: var(--accent-light);">🔄 实时扫描回退</div>
+                    <div class="col-body">
+                        <ul>
+                            <li>无索引时自动回退到实时扫描</li>
+                            <li>ThreadPoolExecutor 多线程并发</li>
+                            <li>4~8 个线程逐文件搜索</li>
+                            <li>字面量预过滤快速排除不匹配文件</li>
+                            <li>支持纯文本 + PDF 逐页搜索</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+            <div class="fts-flow">
+                <div class="fts-step">用户输入关键词</div>
+                <div class="fts-arrow">→</div>
+                <div class="fts-step">检查 FTS5 索引</div>
+                <div class="fts-arrow">→</div>
+                <div class="fts-step" style="border-color: rgba(79,70,229,0.3);">有索引 → MATCH 搜索</div>
+                <div class="fts-arrow">→</div>
+                <div class="fts-step" style="border-color: rgba(6,182,212,0.3);">无索引 → 实时扫描</div>
+            </div>
+        </div>
+
+        <!-- Slide 8: Difficulty 3 - Performance -->
+        <div class="slide" data-index="7">
+            <div class="content-left">
+                <div class="section-label">技术难点</div>
+                <div class="slide-title">性能优化策略</div>
+                <div class="slide-subtitle">从数据库、缓存、线程、渲染四个维度进行系统化优化</div>
+            </div>
+            <div class="perf-grid">
+                <div class="perf-card">
+                    <div class="perf-value">&lt;3ms</div>
+                    <div class="perf-label">文件名搜索响应</div>
+                </div>
+                <div class="perf-card">
+                    <div class="perf-value">4~8</div>
+                    <div class="perf-label">内容搜索线程数</div>
+                </div>
+                <div class="perf-card">
+                    <div class="perf-value">500</div>
+                    <div class="perf-label">批量写入条/批</div>
+                </div>
+                <div class="perf-card">
+                    <div class="perf-value">50</div>
+                    <div class="perf-label">UI 渲染条/批</div>
+                </div>
+            </div>
+            <div class="difficulty-section" style="margin-top: 20px;">
+                <div class="difficulty-card">
+                    <div class="difficulty-title">
+                        <span class="tag tag-success">数据库优化</span>
+                    </div>
+                    <div class="difficulty-body">
+                        SQLite <strong>WAL 模式</strong>（读写互不阻塞）+ 16MB 缓存 + 64MB 内存映射 + 4KB 页大小；<br>
+                        启动时全表加载到 <code>SearchCache</code> 内存缓存，文件名搜索零磁盘 IO；<br>
+                        FTS5 全文索引 + <code>file_content_raw</code> 原始内容存储，内容搜索毫秒级。
+                    </div>
+                </div>
+                <div class="difficulty-card">
+                    <div class="difficulty-title">
+                        <span class="tag tag-accent">UI 性能优化</span>
+                    </div>
+                    <div class="difficulty-body">
+                        搜索防抖 300ms（<code>Debouncer</code>）避免频繁触发；<br>
+                        结果分批渲染（每批 50 条），初始显示 200 条，最多 1000 条；<br>
+                        所有耗时操作在 <code>QThread</code> / <code>ThreadPoolExecutor</code> 中执行，主线程不阻塞。
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Slide 9: Parser Registry -->
+        <div class="slide" data-index="8">
+            <div class="content-left">
+                <div class="section-label">详细设计</div>
+                <div class="slide-title">文件解析器注册表</div>
+                <div class="slide-subtitle">采用注册表模式（Registry Pattern），支持灵活扩展新的文件格式解析器</div>
+            </div>
+            <div class="two-col">
+                <div class="col-box">
+                    <div class="col-title" style="color: var(--warning);">🏛️ 设计模式</div>
+                    <div class="col-body">
+                        <ul>
+                            <li><code>FileParser</code> 抽象基类定义接口</li>
+                            <li><code>can_parse()</code> 判断能否解析</li>
+                            <li><code>parse()</code> 提取文本内容</li>
+                            <li><code>supported_extensions</code> 声明支持的扩展名</li>
+                            <li><code>ParserRegistry</code> 按序遍历所有解析器</li>
+                            <li>新增格式只需实现子类并注册</li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="col-box">
+                    <div class="col-title" style="color: var(--success);">📦 已实现的解析器</div>
+                    <div class="col-body">
+                        <ul>
+                            <li><code>TextParser</code> — 纯文本/代码（自动编码检测）</li>
+                            <li><code>PDFParser</code> — PDF（PyMuPDF 逐页提取）</li>
+                            <li><code>DocxParser</code> — Word（段落+表格提取）</li>
+                            <li><code>XlsxParser</code> — Excel（read_only 模式）</li>
+                            <li><code>PptxParser</code> — PPT（幻灯片文本+表格）</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+            <div class="preview-grid">
+                <div class="preview-item">
+                    <div class="preview-icon">📝</div>
+                    <div class="preview-name">文本/代码</div>
+                    <div class="preview-ext">.py .js .java</div>
+                </div>
+                <div class="preview-item">
+                    <div class="preview-icon">📕</div>
+                    <div class="preview-name">PDF</div>
+                    <div class="preview-ext">.pdf</div>
+                </div>
+                <div class="preview-item">
+                    <div class="preview-icon">🖼️</div>
+                    <div class="preview-name">图片</div>
+                    <div class="preview-ext">.jpg .png .svg</div>
+                </div>
+                <div class="preview-item">
+                    <div class="preview-icon">📊</div>
+                    <div class="preview-name">Excel</div>
+                    <div class="preview-ext">.xlsx</div>
+                </div>
+                <div class="preview-item">
+                    <div class="preview-icon">📑</div>
+                    <div class="preview-name">Markdown</div>
+                    <div class="preview-ext">.md</div>
+                </div>
+                <div class="preview-item">
+                    <div class="preview-icon">🌐</div>
+                    <div class="preview-name">HTML</div>
+                    <div class="preview-ext">.html</div>
+                </div>
+                <div class="preview-item">
+                    <div class="preview-icon">📄</div>
+                    <div class="preview-name">Word</div>
+                    <div class="preview-ext">.docx</div>
+                </div>
+                <div class="preview-item">
+                    <div class="preview-icon">📦</div>
+                    <div class="preview-name">压缩包</div>
+                    <div class="preview-ext">.zip .rar .7z</div>
+                </div>
+                <div class="preview-item">
+                    <div class="preview-icon">🎬</div>
+                    <div class="preview-name">视频/音频</div>
+                    <div class="preview-ext">.mp4 .mp3</div>
+                </div>
+                <div class="preview-item">
+                    <div class="preview-icon">📁</div>
+                    <div class="preview-name">文件夹</div>
+                    <div class="preview-ext">目录浏览</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Slide 10: Demo -->
+        <div class="slide demo-container" data-index="9">
+            <div class="section-label">系统演示</div>
+            <div class="slide-title">功能展示</div>
+            <div class="slide-subtitle">点击下方按钮查看完整功能文档与操作演示</div>
+            <a href="docs/index.html" class="demo-link" target="_blank">
+                🚀 打开 FileFinder 官方文档
+            </a>
+            <div class="demo-features">
+                <div class="demo-feature">🔍 文件名搜索（4 种模式）</div>
+                <div class="demo-feature">📄 文件内容搜索</div>
+                <div class="demo-feature">👁️ 10+ 格式预览</div>
+                <div class="demo-feature">🎯 筛选排序</div>
+            </div>
+        </div>
+
+        <!-- Slide 11: Summary -->
+        <div class="slide" data-index="10">
+            <div class="content-left">
+                <div class="section-label">总结与展望</div>
+                <div class="slide-title">项目成果</div>
+                <div class="slide-subtitle">从零到一，构建了一个功能完整的本地文件搜索工具</div>
+            </div>
+            <div class="summary-grid">
+                <div class="summary-card">
+                    <div class="summary-card-title" style="color: var(--brand-light);">📊 代码规模</div>
+                    <div class="summary-card-body">
+                        20+ 个 Python 模块<br>
+                        6 个数据模型类<br>
+                        5 个文件解析器<br>
+                        60+ 种文件类型图标
+                    </div>
+                </div>
+                <div class="summary-card">
+                    <div class="summary-card-title" style="color: var(--accent-light);">🔍 搜索能力</div>
+                    <div class="summary-card-body">
+                        4 种文件名匹配模式<br>
+                        FTS5 全文索引 + 实时扫描双策略<br>
+                        联合搜索（文件名 ∩ 内容）<br>
+                        相关度评分 + 多维排序
+                    </div>
+                </div>
+                <div class="summary-card">
+                    <div class="summary-card-title" style="color: var(--success);">👁️ 预览能力</div>
+                    <div class="summary-card-body">
+                        10+ 种文件格式预览<br>
+                        代码语法高亮<br>
+                        搜索关键词高亮<br>
+                        PDF 分页渲染 + Excel Sheet 切换
+                    </div>
+                </div>
+                <div class="summary-card">
+                    <div class="summary-card-title" style="color: var(--warning);">🚀 未来计划</div>
+                    <div class="summary-card-body">
+                        系统托盘 + 全局快捷键<br>
+                        主题切换（浅色/深色）<br>
+                        倒排索引 + mmap 流式搜索<br>
+                        PyInstaller 打包发布
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Slide 12: Thanks -->
+        <div class="slide thanks-slide" data-index="11">
+            <div class="thanks-title">感谢聆听</div>
+            <div class="thanks-sub">FileFinder — 让文件搜索不再烦恼</div>
+            <div class="tech-stack">
+                <div class="tech-badge">🐍 Python 3.10+</div>
+                <div class="tech-badge">🎨 PySide6</div>
+                <div class="tech-badge">🗄️ SQLite 3</div>
+                <div class="tech-badge">📝 PyMuPDF</div>
+                <div class="tech-badge">📊 openpyxl</div>
+                <div class="tech-badge">📄 python-docx</div>
+                <div class="tech-badge">🔍 jieba 分词</div>
+                <div class="tech-badge">🔤 charset-normalizer</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="slide-number" id="slideNumber">1 / 12</div>
+    <div class="nav-hint">
+        <kbd>←</kbd> <kbd>→</kbd> 翻页 &nbsp;|&nbsp; <kbd>Space</kbd> 下一页
+    </div>
+
+    <script>
+        const slides = document.querySelectorAll('.slide');
+        const totalSlides = slides.length;
+        let currentSlide = 0;
+        let isTransitioning = false;
+
+        function updateSlide(newIndex, direction) {
+            if (isTransitioning || newIndex < 0 || newIndex >= totalSlides || newIndex === currentSlide) return;
+            isTransitioning = true;
+
+            const oldSlide = slides[currentSlide];
+            const newSlide = slides[newIndex];
+
+            if (direction === 'next') {
+                oldSlide.classList.add('exit-left');
+                newSlide.style.transform = 'translateX(60px)';
+            } else {
+                oldSlide.style.transform = 'translateX(60px)';
+                oldSlide.style.opacity = '0';
+                newSlide.style.transform = 'translateX(-60px)';
+            }
+
+            oldSlide.classList.remove('active');
+
+            requestAnimationFrame(() => {
+                newSlide.classList.add('active');
+                newSlide.style.transform = '';
+
+                setTimeout(() => {
+                    oldSlide.classList.remove('exit-left');
+                    oldSlide.style.transform = '';
+                    oldSlide.style.opacity = '';
+                    currentSlide = newIndex;
+                    isTransitioning = false;
+                    updateUI();
+                }, 600);
+            });
+        }
+
+        function updateUI() {
+            document.getElementById('slideNumber').textContent = `${currentSlide + 1} / ${totalSlides}`;
+            document.getElementById('progressBar').style.width = `${((currentSlide + 1) / totalSlides) * 100}%`;
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === ' ') {
+                e.preventDefault();
+                updateSlide(currentSlide + 1, 'next');
+            } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+                e.preventDefault();
+                updateSlide(currentSlide - 1, 'prev');
+            } else if (e.key === 'Home') {
+                e.preventDefault();
+                updateSlide(0, 'prev');
+            } else if (e.key === 'End') {
+                e.preventDefault();
+                updateSlide(totalSlides - 1, 'next');
+            }
+        });
+
+        let touchStartX = 0;
+        let touchStartY = 0;
+
+        document.addEventListener('touchstart', (e) => {
+            touchStartX = e.touches[0].clientX;
+            touchStartY = e.touches[0].clientY;
+        }, { passive: true });
+
+        document.addEventListener('touchend', (e) => {
+            const dx = e.changedTouches[0].clientX - touchStartX;
+            const dy = e.changedTouches[0].clientY - touchStartY;
+            if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 50) {
+                if (dx < 0) updateSlide(currentSlide + 1, 'next');
+                else updateSlide(currentSlide - 1, 'prev');
+            }
+        }, { passive: true });
+
+        updateUI();
+    </script>
+</body>
+</html>
