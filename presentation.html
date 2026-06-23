@@ -1483,18 +1483,35 @@
         </div>
 
         <!-- Slide 10: Demo -->
-        <div class="slide demo-container" data-index="9">
-            <div class="section-label">系统演示</div>
-            <div class="slide-title">功能展示</div>
-            <div class="slide-subtitle">点击下方按钮查看完整功能文档与操作演示</div>
-            <a href="docs/index.html" class="demo-link" target="_blank">
+        <div class="slide" data-index="9" style="text-align: center;">
+            <div class="section-label" style="align-self: center;">系统演示</div>
+            <div class="slide-title" style="align-self: center; text-align: center;">功能展示</div>
+            <div class="slide-subtitle" style="align-self: center; text-align: center;">点击下方按钮查看完整功能文档，然后进行实际操作演示</div>
+            <a href="file:///d:/大二下资料/Python程序设计/FileFinder/docs/index.html" style="
+                display: inline-flex;
+                align-items: center;
+                gap: 12px;
+                background: linear-gradient(135deg, #4f46e5 0%, #06b6d4 100%);
+                color: white;
+                text-decoration: none;
+                padding: 20px 48px;
+                border-radius: 14px;
+                font-size: 22px;
+                font-weight: 700;
+                margin-top: 36px;
+                box-shadow: 0 4px 24px rgba(79,70,229,0.3);
+                transition: all 0.3s ease;
+                cursor: pointer;
+            " target="_blank"
+               onmouseover="this.style.transform='translateY(-3px)';this.style.boxShadow='0 8px 40px rgba(79,70,229,0.4)'"
+               onmouseout="this.style.transform='';this.style.boxShadow='0 4px 24px rgba(79,70,229,0.3)'">
                 🚀 打开 FileFinder 官方文档
             </a>
-            <div class="demo-features">
-                <div class="demo-feature">🔍 文件名搜索（4 种模式）</div>
-                <div class="demo-feature">📄 文件内容搜索</div>
-                <div class="demo-feature">👁️ 10+ 格式预览</div>
-                <div class="demo-feature">🎯 筛选排序</div>
+            <div style="display: flex; gap: 16px; margin-top: 36px; flex-wrap: wrap; justify-content: center;">
+                <div style="background: #1e293b; border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; padding: 14px 22px; font-size: 15px;">🔍 文件名搜索（4 种模式）</div>
+                <div style="background: #1e293b; border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; padding: 14px 22px; font-size: 15px;">📄 文件内容搜索</div>
+                <div style="background: #1e293b; border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; padding: 14px 22px; font-size: 15px;">👁️ 10+ 格式预览</div>
+                <div style="background: #1e293b; border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; padding: 14px 22px; font-size: 15px;">🎯 筛选排序</div>
             </div>
         </div>
 
